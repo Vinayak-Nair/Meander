@@ -31,24 +31,6 @@ public final class Settings {
         set { d.set(newValue, forKey: "modelRepo") }
     }
 
-    public var indicConformerPythonPath: String {
-        get { d.string(forKey: "indicConformerPythonPath") ?? "python3" }
-        set { d.set(newValue, forKey: "indicConformerPythonPath") }
-    }
-
-    public var indicConformerModelID: String {
-        get {
-            d.string(forKey: "indicConformerModelID")
-                ?? "ai4bharat/indic-conformer-600m-multilingual"
-        }
-        set { d.set(newValue, forKey: "indicConformerModelID") }
-    }
-
-    public var indicConformerDecoder: String {
-        get { d.string(forKey: "indicConformerDecoder") ?? "ctc" }
-        set { d.set(newValue, forKey: "indicConformerDecoder") }
-    }
-
     /// Optional custom model storage directory (e.g. an external SSD). When nil,
     /// models are stored under Application Support.
     public var modelStoragePath: String? {
@@ -76,14 +58,12 @@ public final class Settings {
     }
 
     /// The language used for transcription and cleanup. English-only backends
-    /// ignore an old multilingual preference; IndicConformer requires an explicit
-    /// supported Indian language rather than auto-detect.
+    /// ignore an old multilingual preference; WhisperKit honors the selection
+    /// (including auto-detect).
     public var effectiveLanguage: Language {
         switch transcriptionBackend {
         case .fluidAudioEnglish, .nemotronEnglish:
             return .english
-        case .indicConformer:
-            return Language.indicConformerLanguages.contains(language) ? language : .hindi
         case .whisperKit:
             return language
         }
@@ -113,11 +93,19 @@ public final class Settings {
 
     // MARK: Cleanup
 
-    /// Active cleanup provider id: "none", "deterministic", "openai", or "ollama".
+    /// Active cleanup provider id: "none", "deterministic", "openai", or
+    /// "ollama". Defaults to the instant on-device rules. (The legacy "apple"
+    /// on-device LLM was removed: it cold-loaded the model on every dictation,
+    /// costing 14-21s per utterance; its stored value maps back to deterministic.)
     public var cleanupProviderID: String {
-        get { d.string(forKey: "cleanupProviderID") ?? "deterministic" }
+        get {
+            let stored = d.string(forKey: "cleanupProviderID") ?? Self.defaultCleanupProviderID
+            return stored == "apple" ? "deterministic" : stored
+        }
         set { d.set(newValue, forKey: "cleanupProviderID") }
     }
+
+    public static let defaultCleanupProviderID = "deterministic"
 
     // OpenAI-compatible (OpenAI, Groq, Sarvam, LM Studio, …)
     public var openAIBaseURL: String {

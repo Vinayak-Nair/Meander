@@ -32,18 +32,35 @@ public struct CleanupProviderInfo: Identifiable, Hashable, Sendable {
 }
 
 public enum CleanupRegistry {
-    public static let all: [CleanupProviderInfo] = [
-        .init(id: "deterministic", displayName: "On-device cleanup (recommended)", requiresNetwork: false, requiresAPIKey: false),
-        .init(id: "none",          displayName: "Raw transcription (no cleanup)",  requiresNetwork: false, requiresAPIKey: false),
-        .init(id: "openai",        displayName: "Cloud (OpenAI / Groq / Sarvam)",  requiresNetwork: true,  requiresAPIKey: true),
-        .init(id: "ollama",        displayName: "Local LLM via Ollama (advanced)", requiresNetwork: false, requiresAPIKey: false),
-    ]
+    public static var all: [CleanupProviderInfo] {
+        [
+            .init(id: "deterministic", displayName: "On-device rules (fast, no AI)",  requiresNetwork: false, requiresAPIKey: false),
+            .init(id: "mlx",           displayName: "On-device LLM (MLX, beta)",      requiresNetwork: false, requiresAPIKey: false),
+            .init(id: "none",          displayName: "Raw transcription (no cleanup)", requiresNetwork: false, requiresAPIKey: false),
+            .init(id: "openai",        displayName: "Cloud (OpenAI / Groq / Sarvam)", requiresNetwork: true,  requiresAPIKey: true),
+            .init(id: "ollama",        displayName: "Local LLM via Ollama (advanced)", requiresNetwork: false, requiresAPIKey: false),
+        ]
+    }
 }
 
 /// Builds the active provider from current settings. The optional `profile`
-/// carries the per-app tone instruction, which only the LLM providers use.
+/// carries the per-app tone instruction and `destination` names the app the
+/// text is headed to ("Gmail", "Claude Code"); only the LLM providers use them.
 public enum CleanupFactory {
-    public static func make(settings: Settings, profile: FormattingProfile = .standard) -> CleanupProvider {
+    /// Providers that live in heavier targets (e.g. MLX) register a builder here,
+    /// keyed by provider id, so the pipeline can use them without DriftKit taking
+    /// a dependency on that target. The app wires these up at launch. Returning a
+    /// shared instance (not a fresh one per call) is what keeps a warm model warm.
+    public static var externalBuilders: [String: @Sendable (Settings, FormattingProfile, String?) -> CleanupProvider] = [:]
+
+    public static func make(
+        settings: Settings,
+        profile: FormattingProfile = .standard,
+        destination: String? = nil
+    ) -> CleanupProvider {
+        if let build = externalBuilders[settings.cleanupProviderID] {
+            return build(settings, profile, destination)
+        }
         switch settings.cleanupProviderID {
         case "none":
             return PassthroughCleanup()
@@ -53,14 +70,16 @@ public enum CleanupFactory {
                 model: settings.openAIModel,
                 apiKey: settings.openAIKey,
                 tone: profile.tone,
-                vocabulary: settings.customVocabulary
+                vocabulary: settings.customVocabulary,
+                destination: destination
             )
         case "ollama":
             return OllamaCleanup(
                 baseURL: settings.ollamaBaseURL,
                 model: settings.ollamaModel,
                 tone: profile.tone,
-                vocabulary: settings.customVocabulary
+                vocabulary: settings.customVocabulary,
+                destination: destination
             )
         default:
             return DeterministicCleanup()
@@ -71,7 +90,12 @@ public enum CleanupFactory {
 /// Shared instruction used by every LLM-backed provider. Crucially tells the
 /// model to keep the original language and script (so Malayalam stays Malayalam).
 enum CleanupPrompt {
-    static func system(for language: Language, tone: String? = nil, vocabulary: [String] = []) -> String {
+    static func system(
+        for language: Language,
+        tone: String? = nil,
+        vocabulary: [String] = [],
+        destination: String? = nil
+    ) -> String {
         let langClause: String
         if language.isAuto {
             langClause = "the same language and script as the input"
@@ -85,6 +109,9 @@ enum CleanupPrompt {
         Do NOT translate. Do NOT add information, answer questions, or add commentary. \
         Preserve the original meaning. Output ONLY the cleaned text.
         """
+        if let destination, !destination.isEmpty {
+            prompt += " The cleaned text will be pasted into \(destination), so shape it the way text is normally written there."
+        }
         if let tone, !tone.isEmpty {
             prompt += " \(tone)"
         }

@@ -1,5 +1,28 @@
 import Foundation
 
+/// Latency instrumentation. GUI apps launched via `open` send stdout to
+/// /dev/null, and the unified log store isn't readable in every dev environment,
+/// so we append plain lines to a file we can always `cat`:
+///   ~/Library/Logs/Drift-latency.log
+public enum LatencyLog {
+    public static let fileURL: URL = FileManager.default
+        .homeDirectoryForCurrentUser
+        .appendingPathComponent("Library/Logs/Drift-latency.log")
+
+    public static func record(_ message: String) {
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        let line = "\(stamp) \(message)\n"
+        guard let data = line.data(using: .utf8) else { return }
+        if let handle = try? FileHandle(forWritingTo: fileURL) {
+            defer { try? handle.close() }
+            _ = try? handle.seekToEnd()
+            try? handle.write(contentsOf: data)
+        } else {
+            try? data.write(to: fileURL, options: .atomic)
+        }
+    }
+}
+
 /// Orchestrates one dictation: record -> transcribe -> clean. UI-agnostic, so the
 /// app layer only deals with start/stop and the final string (and pasting it).
 public final class Pipeline {
@@ -57,8 +80,9 @@ public final class Pipeline {
     }
 
     /// Stops a streaming session, finishes decoding, and returns the cleaned text.
-    /// `targetBundleID` is the app being dictated into, used to pick a formatting profile.
-    public func stopStreamingAndProcess(targetBundleID: String? = nil) async throws -> String {
+    /// `target` describes the app being dictated into (bundle id, name, focused
+    /// window title), used to pick a formatting profile and inform LLM cleanup.
+    public func stopStreamingAndProcess(target: DictationTarget? = nil) async throws -> String {
         recorder.onSamples = nil
         _ = recorder.stop()
         guard let streaming = transcriber as? StreamingTranscriber else { return "" }
@@ -67,30 +91,37 @@ public final class Pipeline {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
 
-        return await clean(trimmed, targetBundleID: targetBundleID)
+        return await clean(trimmed, target: target)
     }
 
     /// Stops recording, transcribes, and cleans using the currently selected
     /// provider. Returns "" if nothing usable was captured. Cleanup failures
     /// degrade gracefully: selected provider -> on-device cleanup -> raw text.
-    public func stopAndProcess(targetBundleID: String? = nil) async throws -> String {
+    public func stopAndProcess(target: DictationTarget? = nil) async throws -> String {
         let samples = recorder.stop()
         guard !samples.isEmpty else { return "" }
 
         let language = settings.effectiveLanguage
+        let transcribeStart = DispatchTime.now()
         let raw = try await transcriber.transcribe(samples: samples, language: language)
+        let transcribeMs = Self.elapsedMs(since: transcribeStart)
+        let audioMs = Double(samples.count) / 16_000 * 1_000
+        LatencyLog.record(String(
+            format: "audio %.0fms · transcribe %.0fms (RTF %.2f)",
+            audioMs, transcribeMs, audioMs > 0 ? transcribeMs / audioMs : 0
+        ))
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
 
-        return await clean(trimmed, targetBundleID: targetBundleID)
+        return await clean(trimmed, target: target)
     }
 
     /// Cleans transcript text using the formatting profile for the destination app
     /// and the selected provider. Failures degrade gracefully: selected provider
     /// -> on-device cleanup -> raw text.
-    private func clean(_ text: String, targetBundleID: String?) async -> String {
+    private func clean(_ text: String, target: DictationTarget?) async -> String {
         let language = settings.effectiveLanguage
-        let profile = FormattingProfiles.resolve(bundleID: targetBundleID, settings: settings)
+        let profile = FormattingProfiles.resolve(target: target, settings: settings)
         var prepared = applyCommandMode(to: text, language: language)
 
         // Code destinations are inserted verbatim — never reshaped, never sent to
@@ -101,12 +132,25 @@ public final class Pipeline {
         // fully on-device) sees "Karan Johar" instead of "current johar".
         prepared = VocabularyCorrector.correct(prepared, vocabulary: settings.customVocabulary)
 
-        let cleaner = CleanupFactory.make(settings: settings, profile: profile)
+        let cleaner = CleanupFactory.make(
+            settings: settings,
+            profile: profile,
+            destination: DestinationDetector.displayName(for: target)
+        )
         var result: String
+        let cleanupStart = DispatchTime.now()
         do {
             result = try await cleaner.clean(prepared, language: language)
+            LatencyLog.record(String(
+                format: "cleanup %.0fms (%@, %d→%d chars)",
+                Self.elapsedMs(since: cleanupStart), cleaner.id, prepared.count, result.count
+            ))
         } catch {
             result = (try? await DeterministicCleanup().clean(prepared, language: language)) ?? prepared
+            LatencyLog.record(String(
+                format: "cleanup %.0fms (%@ FAILED → deterministic fallback)",
+                Self.elapsedMs(since: cleanupStart), cleaner.id
+            ))
         }
 
         if profile.style == .casual {
@@ -128,5 +172,10 @@ public final class Pipeline {
     /// Discard an in-progress recording without processing it.
     public func cancel() {
         _ = recorder.stop()
+    }
+
+    /// Milliseconds elapsed since `start`, for the `[Latency]` instrumentation.
+    private static func elapsedMs(since start: DispatchTime) -> Double {
+        Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
     }
 }

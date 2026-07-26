@@ -31,6 +31,10 @@ targets:
     dependencies:
       - package: DriftKit
         product: DriftKit
+      # On-device LLM cleanup (MLX). Built via xcodebuild so the Metal shader
+      # library is compiled (plain `swift build` can't). Beta / measurement.
+      - package: DriftKit
+        product: DriftMLX
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.drift.app

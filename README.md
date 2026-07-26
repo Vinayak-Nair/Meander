@@ -2,12 +2,12 @@
 
 **Local-first voice dictation for macOS. A free, open-source alternative to Wispr Flow.**
 
-Hold a key, speak, and Drift types cleaned-up text into whatever app you're using. English transcription runs entirely on your Mac with [FluidAudio](https://github.com/FluidInference/FluidAudio); [WhisperKit](https://github.com/argmaxinc/WhisperKit) and AI4Bharat IndicConformer are available for multilingual and Indic-language dictation.
+Hold a key, speak, and Drift types cleaned-up text into whatever app you're using. English transcription runs entirely on your Mac with [FluidAudio](https://github.com/FluidInference/FluidAudio); [WhisperKit](https://github.com/argmaxinc/WhisperKit) adds fully on-device dictation in Indian and international languages.
 
 - 🎙️ **Push-to-talk anywhere**, system-wide
 - 🔒 **Private by default**: on-device transcription and on-device cleanup, no account, no API key
 - 🇬🇧 **English-first right now**, using FluidAudio's local Parakeet model for fast dictation
-- 🌐 **Multilingual optional**, via WhisperKit or AI4Bharat IndicConformer for Indian-language transcription
+- 🌐 **Multilingual optional**, via WhisperKit for Indian and international languages, all on-device
 - 🧹 **Smart cleanup**: removes filler words and fixes punctuation instantly on-device; optional cloud or local LLM cleanup for higher quality
 - 🪶 **Native and lightweight**: a Swift menu-bar app, no Electron
 - 🆓 **MIT licensed**
@@ -35,28 +35,13 @@ No Homebrew, no Terminal, no separate downloads. Everything is handled inside th
 
 Drift currently defaults to **FluidAudio English** using Parakeet TDT v3.
 
-In Settings you can switch the dictation model to:
+In Settings you can switch the dictation model to **WhisperKit Multilingual**, which runs fully on-device (no Python, no account, no gated downloads). It covers:
 
-- **WhisperKit Multilingual** for English plus Hindi, Tamil, Malayalam, Kannada, Telugu, and others.
-- **AI4Bharat IndicConformer** for the 22 official Indian languages supported by `ai4bharat/indic-conformer-600m-multilingual`: Assamese, Bengali, Bodo, Dogri, Gujarati, Hindi, Kannada, Konkani, Kashmiri, Maithili, Malayalam, Manipuri, Marathi, Nepali, Odia, Punjabi, Sanskrit, Santali, Sindhi, Tamil, Telugu, and Urdu.
+- **Indian languages:** Hindi, Bengali, Tamil, Telugu, Kannada, Malayalam, Marathi, Gujarati, Punjabi, Urdu, Nepali, Sanskrit, Sindhi, and Assamese.
+- **International languages:** Spanish, French, German, Italian, Portuguese, Dutch, Polish, Turkish, Chinese, Japanese, Korean, Arabic, Russian, and many more.
+- **Auto-detect**, which lets Whisper identify the spoken language on its own.
 
-IndicConformer is experimental in Drift. It runs through a local Python worker because the Hugging Face model uses custom Python/ONNX code rather than WhisperKit/Core ML.
-
-### AI4Bharat IndicConformer setup
-
-The model repository is gated on Hugging Face, so you must accept access once before Drift can download it.
-
-```bash
-./scripts/setup-indic-conformer.sh
-```
-
-Then:
-
-1. Open [ai4bharat/indic-conformer-600m-multilingual](https://huggingface.co/ai4bharat/indic-conformer-600m-multilingual) and accept the access conditions.
-2. Run `.venv-indic-conformer/bin/huggingface-cli login`.
-3. In Drift Settings, pick **AI4Bharat IndicConformer** and set **Python path** to the absolute path printed by the setup script.
-
-The first transcription can take a while because the 600M model downloads and loads into the worker. Subsequent dictations reuse the same local worker while Drift is running.
+Indian-language and low-resource accuracy is best with the Large model; smaller Whisper variants trade accuracy for speed. The model downloads once, then runs locally with no network.
 
 ## Cleanup options
 
@@ -120,7 +105,7 @@ longer changes). No Apple Developer account required.
 | Area | Path | Responsibility |
 |------|------|----------------|
 | Core | `Sources/DriftKit/Pipeline.swift` | record ▸ transcribe ▸ clean orchestration |
-| STT | `Sources/DriftKit/Transcription/` | `Transcriber` protocol, FluidAudio + WhisperKit + IndicConformer impls, model download/worker bridge |
+| STT | `Sources/DriftKit/Transcription/` | `Transcriber` protocol, FluidAudio + WhisperKit impls, model download |
 | Cleanup | `Sources/DriftKit/Cleanup/` | `CleanupProvider` protocol + deterministic / OpenAI-compatible / Ollama |
 | Audio | `Sources/DriftKit/Audio/Recorder.swift` | mic capture to 16 kHz samples |
 | App | `Sources/DriftApp/` | menu bar, onboarding, settings, hotkey, paste |
@@ -160,7 +145,7 @@ On a macOS GitHub runner the workflow archives the app, downloads and bundles th
 
 ## Credits
 
-Built on [FluidAudio](https://github.com/FluidInference/FluidAudio) by FluidInference, [WhisperKit](https://github.com/argmaxinc/WhisperKit) by Argmax, and [AI4Bharat IndicConformer](https://huggingface.co/ai4bharat/indic-conformer-600m-multilingual). Inspired by Wispr Flow.
+Built on [FluidAudio](https://github.com/FluidInference/FluidAudio) by FluidInference and [WhisperKit](https://github.com/argmaxinc/WhisperKit) by Argmax. Inspired by Wispr Flow.
 
 ## License
 

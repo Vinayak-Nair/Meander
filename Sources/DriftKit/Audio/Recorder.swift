@@ -52,12 +52,14 @@ public final class Recorder {
         if settings.recorderUsesAudioQueue, startAudioQueue() {
             activeBackend = .audioQueue
             isRecording = true
+            LatencyLog.record("recorder start · backend=audioQueue · device=\(selectedDeviceUID() ?? "systemDefault")")
             return
         }
 
         try startEngine()
         activeBackend = .engine
         isRecording = true
+        LatencyLog.record("recorder start · backend=engine (queue unavailable or disabled)")
     }
 
     /// Stops capture and returns the captured samples. Returns an empty array if
@@ -75,6 +77,19 @@ public final class Recorder {
         isRecording = false
 
         lock.lock(); let captured = samples; lock.unlock()
+
+        // Diagnostic: report what capture actually produced. A near-zero peak
+        // with a healthy sample count means the queue ran but delivered silence
+        // (typically a missing microphone permission for this app), as opposed to
+        // no samples at all (capture never started).
+        var peak: Float = 0
+        for s in captured { let a = abs(s); if a > peak { peak = a } }
+        LatencyLog.record(String(
+            format: "recorder stop · samples=%d (%.2fs) · peak=%.4f%@",
+            captured.count, Double(captured.count) / targetSampleRate, peak,
+            peak < 0.0009 ? " · SILENT (check mic permission)" : ""
+        ))
+
         guard captured.count > Int(targetSampleRate * 0.2) else { return [] }
         return captured
     }

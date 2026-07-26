@@ -36,6 +36,22 @@ final class DeterministicCleanupTests: XCTestCase {
         XCTAssertEqual(out, "Wait, what?")
     }
 
+    func testCollapsesDoubledWords() async throws {
+        let out = try await sut.clean("I I went to the the store", language: .english)
+        XCTAssertEqual(out, "I went to the store")
+    }
+
+    func testDoubledWordCollapseIsCaseInsensitiveKeepsFirstCasing() async throws {
+        let out = try await sut.clean("The the cat sat", language: .english)
+        XCTAssertEqual(out, "The cat sat")
+    }
+
+    func testDoubledWordCollapseLeavesPunctuatedRepeatsIntact() async throws {
+        // "no, no" is deliberate, not a dictation stutter — the comma blocks it.
+        let out = try await sut.clean("no, no that is fine", language: .english)
+        XCTAssertTrue(out.lowercased().hasPrefix("no, no"))
+    }
+
     // Indic scripts must never be word-stripped or altered beyond whitespace.
     func testMalayalamIsNonDestructive() async throws {
         let input = "എനിക്ക് വിശക്കുന്നു"

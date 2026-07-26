@@ -31,6 +31,7 @@ public struct DeterministicCleanup: CleanupProvider {
             return t.trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
+        t = removeDoubledWords(from: t)
         t = removeFillers(from: t)
         t = collapseWhitespace(t)
         t = removeSpaceBeforePunctuation(t)
@@ -49,6 +50,19 @@ public struct DeterministicCleanup: CleanupProvider {
         x = x.replacingOccurrences(of: " *\\n *", with: "\n", options: .regularExpression)
         x = x.replacingOccurrences(of: "\\n{3,}", with: "\n\n", options: .regularExpression)
         return x
+    }
+
+    /// Collapses an immediately repeated word ("the the cat" -> "the cat"), a
+    /// common dictation/transcription artifact. Case-insensitive match, keeps the
+    /// first occurrence's casing. A word is letters/apostrophes only, so repeated
+    /// numbers ("1 1") are left alone. Punctuation between words also blocks the
+    /// match, so "no, no" stays intact.
+    private func removeDoubledWords(from s: String) -> String {
+        s.replacingOccurrences(
+            of: "\\b([\\p{L}']+)\\s+\\1\\b",
+            with: "$1",
+            options: [.regularExpression, .caseInsensitive]
+        )
     }
 
     private func removeFillers(from s: String) -> String {

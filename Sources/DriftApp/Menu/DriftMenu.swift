@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import DriftKit
 
@@ -57,7 +58,11 @@ struct DriftMenu: View {
         Divider()
 
         Button("Dashboard…") { openWindow(id: "dashboard") }
-        Button("Settings…") { state.showSettingsWindow() }
+        Button("Settings…") {
+            state.dashboardSection = .settings
+            openWindow(id: "dashboard")
+            NSApp.activate(ignoringOtherApps: true)
+        }
         Button("Setup & Permissions…") { state.showOnboardingWindow() }
 
         Divider()

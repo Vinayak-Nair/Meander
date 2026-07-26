@@ -39,8 +39,12 @@ else
   echo "    Run scripts/setup-dev-cert.sh so the hotkey permissions persist."
 fi
 
+# -skipPackagePluginValidation / -skipMacroValidation: MLX pulls build-tool
+# plugins (CudaBuild) and swift-syntax macros that Xcode otherwise gates behind
+# an interactive trust prompt, which fails a non-interactive build.
 xcodebuild -project Drift.xcodeproj -scheme Drift -configuration "$CONFIG" \
-  -derivedDataPath "$DD" "${SIGN_ARGS[@]}" build >/dev/null
+  -derivedDataPath "$DD" "${SIGN_ARGS[@]}" \
+  -skipPackagePluginValidation -skipMacroValidation build >/dev/null
 
 echo "==> Deploying to $DEST"
 pkill -x Drift 2>/dev/null || true

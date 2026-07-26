@@ -9,7 +9,10 @@ final class CleanupFactoryTests: XCTestCase {
         return Settings(defaults: defaults)
     }
 
-    func testDefaultsToDeterministic() {
+    func testDefaultsToDeterministicCleanup() {
+        // On-device rules are the instant, always-available default now that the
+        // Apple Intelligence LLM path (14-21s cold-load per dictation) is gone.
+        XCTAssertEqual(makeSettings().cleanupProviderID, "deterministic")
         XCTAssertEqual(CleanupFactory.make(settings: makeSettings()).id, "deterministic")
     }
 
@@ -19,6 +22,21 @@ final class CleanupFactoryTests: XCTestCase {
             s.cleanupProviderID = id
             XCTAssertEqual(CleanupFactory.make(settings: s).id, id)
         }
+    }
+
+    func testLegacyAppleSettingMapsToDeterministic() {
+        // Users who had Apple Intelligence selected fall back cleanly instead of
+        // hitting an unknown provider id.
+        let s = makeSettings()
+        s.cleanupProviderID = "apple"
+        XCTAssertEqual(s.cleanupProviderID, "deterministic")
+        XCTAssertEqual(CleanupFactory.make(settings: s).id, "deterministic")
+    }
+
+    func testRegistryDoesNotListApple() {
+        XCTAssertFalse(CleanupRegistry.all.contains { $0.id == "apple" })
+        // The universal floor must always be present.
+        XCTAssertTrue(CleanupRegistry.all.contains { $0.id == "deterministic" })
     }
 
     func testProviderNetworkFlags() {
@@ -54,18 +72,29 @@ final class CleanupFactoryTests: XCTestCase {
         XCTAssertEqual(s.effectiveLanguage, .malayalam)
     }
 
-    func testIndicConformerBackendUsesSupportedSelectedLanguage() {
+    func testWhisperKitBackendUsesInternationalLanguage() {
         let s = makeSettings()
-        s.language = .bengali
-        s.transcriptionBackend = .indicConformer
-        XCTAssertEqual(s.effectiveLanguage, .bengali)
+        s.language = .japanese
+        s.transcriptionBackend = .whisperKit
+        XCTAssertEqual(s.effectiveLanguage, .japanese)
     }
 
-    func testIndicConformerBackendFallsBackFromUnsupportedLanguage() {
+    func testWhisperKitBackendHonorsAutoDetect() {
         let s = makeSettings()
-        s.language = .english
-        s.transcriptionBackend = .indicConformer
-        XCTAssertEqual(s.effectiveLanguage, .hindi)
+        s.language = .auto
+        s.transcriptionBackend = .whisperKit
+        XCTAssertEqual(s.effectiveLanguage, .auto)
+    }
+
+    func testWhisperKitLanguagesCoverIndicAndInternational() {
+        XCTAssertTrue(Language.whisperKitLanguages.contains(.hindi))
+        XCTAssertTrue(Language.whisperKitLanguages.contains(.tamil))
+        XCTAssertTrue(Language.whisperKitLanguages.contains(.malayalam))
+        XCTAssertTrue(Language.whisperKitLanguages.contains(.kannada))
+        XCTAssertTrue(Language.whisperKitLanguages.contains(.telugu))
+        XCTAssertTrue(Language.whisperKitLanguages.contains(.spanish))
+        XCTAssertTrue(Language.whisperKitLanguages.contains(.chinese))
+        XCTAssertTrue(Language.whisperKitLanguages.contains(.arabic))
     }
 
     func testDefaultModelIsTurbo() {

@@ -1,0 +1,494 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drift cleanup eval</title>
+<style>:root{
+  --bg:#f6f7f5; --panel:#ffffff; --ink:#1a1d1a; --ink-2:#5c6560; --line:#e4e7e3;
+  --accent:#2f7d4f; --good:#2f7d4f; --good-bg:#e8f3ec; --warn:#b6791f; --warn-bg:#faf1df;
+  --bad:#c0413b; --bad-bg:#fbeceb; --code-bg:#f2f4f1; --shadow:0 1px 2px rgba(20,30,20,.06),0 6px 16px rgba(20,30,20,.05);
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#14161a; --panel:#1c1f24; --ink:#e9edea; --ink-2:#98a2a0; --line:#2b2f36;
+    --accent:#5cc98a; --good:#5cc98a; --good-bg:#173026; --warn:#e0b060; --warn-bg:#332811;
+    --bad:#f0817b; --bad-bg:#331f1e; --code-bg:#23272e; --shadow:0 1px 2px rgba(0,0,0,.3),0 8px 24px rgba(0,0,0,.28);
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.55 -apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;
+  -webkit-font-smoothing:antialiased;}
+main{max-width:1080px;margin:0 auto;padding:40px 24px 80px}
+.page-head{margin-bottom:32px}
+h1{font-size:26px;font-weight:680;letter-spacing:-.02em;margin:0}
+.sub{color:var(--ink-2);margin:6px 0 0;font-variant-numeric:tabular-nums}
+section{margin-top:40px}
+h2{font-size:13px;font-weight:640;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-2);margin:0 0 16px}
+code{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-size:13px}
+.nl{color:var(--accent);opacity:.7;padding:0 2px}
+
+/* Model cards */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 18px 16px;box-shadow:var(--shadow)}
+.card-name{font-weight:600;font-size:14px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tag{font-size:10px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--warn);background:var(--warn-bg);padding:2px 6px;border-radius:5px}
+.rate{font-size:38px;font-weight:720;letter-spacing:-.03em;margin:10px 0 2px;font-variant-numeric:tabular-nums}
+.rate .pct{font-size:18px;font-weight:600;margin-left:2px}
+.rate.good{color:var(--good)} .rate.warn{color:var(--warn)} .rate.bad{color:var(--bad)}
+.rate-bar{height:5px;border-radius:99px;background:var(--code-bg);overflow:hidden;margin:8px 0 14px}
+.rate-bar span{display:block;height:100%;background:var(--accent);border-radius:99px}
+.card-stats{display:flex;gap:18px}
+.card-stats .k{display:block;font-size:11px;color:var(--ink-2);text-transform:uppercase;letter-spacing:.04em}
+.card-stats .v{display:block;font-weight:600;font-variant-numeric:tabular-nums;margin-top:2px}
+
+/* Rule matrix */
+.scroll{overflow-x:auto}
+table.matrix{border-collapse:separate;border-spacing:0;width:100%;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+table.matrix th,table.matrix td{padding:9px 12px;text-align:center;border-bottom:1px solid var(--line);font-size:13px}
+table.matrix tr:last-child td{border-bottom:none}
+table.matrix th{font-weight:600;color:var(--ink-2);background:var(--code-bg);font-size:12px}
+.rule-col{text-align:left!important;color:var(--ink)}
+td.cell{font-weight:700}
+td.pass{color:var(--good)} td.fail{color:var(--bad)}
+td.fail .n{font-size:11px;font-weight:600;margin-left:3px;opacity:.8}
+
+/* Per-case */
+.case{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:12px;box-shadow:var(--shadow)}
+.case-head{display:flex;align-items:baseline;gap:10px;margin-bottom:10px}
+.case-name{font-weight:640;font-size:14px}
+.case-rule{font-size:12px;color:var(--ink-2)}
+.case-in{background:var(--code-bg);border-radius:8px;padding:8px 12px;margin-bottom:12px;display:flex;gap:10px;align-items:baseline}
+.in-label{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-2);flex:none;padding-top:1px}
+table.io{width:100%;border-collapse:collapse}
+table.io th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-2);font-weight:600;padding:4px 10px 8px;border-bottom:1px solid var(--line)}
+table.io td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+table.io tr:last-child td{border-bottom:none}
+td.m{font-weight:600;white-space:nowrap;font-size:13px}
+td.out code{color:var(--ink)}
+td.lat{font-variant-numeric:tabular-nums;color:var(--ink-2);white-space:nowrap;text-align:right}
+.chip{display:inline-block;font-size:12px;font-weight:600;padding:2px 9px;border-radius:99px;line-height:1.5}
+.chip.pass{color:var(--good);background:var(--good-bg)}
+.chip.fail{color:var(--bad);background:var(--bad-bg);font-weight:500}</style>
+</head>
+<body>
+<main>
+  <header class="page-head">
+    <h1>Drift cleanup eval</h1>
+    <p class="sub">2026-07-24 21:22 · 26 contract cases · median of timed runs</p>
+  </header>
+  <section><h2>Models at a glance</h2><div class="cards"><div class="card">
+  <div class="card-name">Raw (no cleanup)</div>
+  <div class="rate bad">46<span class="pct">%</span></div>
+  <div class="rate-bar"><span style="width:46%"></span></div>
+  <div class="card-stats">
+    <div><span class="k">Passed</span><span class="v">12/26</span></div>
+    <div><span class="k">Avg</span><span class="v">0.00 ms</span></div>
+    <div><span class="k">p95</span><span class="v">0.00 ms</span></div>
+  </div>
+</div>
+<div class="card">
+  <div class="card-name">Deterministic</div>
+  <div class="rate warn">65<span class="pct">%</span></div>
+  <div class="rate-bar"><span style="width:65%"></span></div>
+  <div class="card-stats">
+    <div><span class="k">Passed</span><span class="v">17/26</span></div>
+    <div><span class="k">Avg</span><span class="v">0.42 ms</span></div>
+    <div><span class="k">p95</span><span class="v">0.51 ms</span></div>
+  </div>
+</div></div></section>
+  <section><h2>Failures by rule</h2><div class="scroll"><table class="matrix"><tr><th class="rule-col">Rule</th><th>Raw (no cleanup)</th><th>Deterministic</th></tr><tr><td class="rule-col">remove speech fillers</td><td class="cell fail">✗<span class="n">2</span></td><td class="cell pass">✓</td></tr><tr><td class="rule-col">remove 'like' as filler</td><td class="cell fail">✗<span class="n">1</span></td><td class="cell fail">✗<span class="n">1</span></td></tr><tr><td class="rule-col">preserve 'like' when not filler</td><td class="cell pass">✓</td><td class="cell pass">✓</td></tr><tr><td class="rule-col">remove accidental repetitions</td><td class="cell fail">✗<span class="n">2</span></td><td class="cell fail">✗<span class="n">1</span></td></tr><tr><td class="rule-col">repair false starts</td><td class="cell fail">✗<span class="n">1</span></td><td class="cell fail">✗<span class="n">1</span></td></tr><tr><td class="rule-col">add punctuation</td><td class="cell fail">✗<span class="n">1</span></td><td class="cell fail">✗<span class="n">1</span></td></tr><tr><td class="rule-col">capitalize sentences</td><td class="cell fail">✗<span class="n">1</span></td><td class="cell pass">✓</td></tr><tr><td class="rule-col">capitalize proper nouns</td><td class="cell fail">✗<span class="n">1</span></td><td class="cell fail">✗<span class="n">1</span></td></tr><tr><td class="rule-col">make light grammatical corrections</td><td class="cell fail">✗<span class="n">1</span></td><td class="cell fail">✗<span class="n">1</span></td></tr><tr><td class="rule-col">normalize spacing</td><td class="cell fail">✗<span class="n">1</span></td><td class="cell pass">✓</td></tr><tr><td class="rule-col">convert spoken punctuation</td><td class="cell fail">✗<span class="n">3</span></td><td class="cell fail">✗<span class="n">3</span></td></tr><tr><td class="rule-col">preserve the user's tone and vocabulary</td><td class="cell pass">✓</td><td class="cell pass">✓</td></tr><tr><td class="rule-col">must not summarize</td><td class="cell pass">✓</td><td class="cell pass">✓</td></tr><tr><td class="rule-col">must not add new information</td><td class="cell pass">✓</td><td class="cell pass">✓</td></tr><tr><td class="rule-col">must not make the writing more formal</td><td class="cell pass">✓</td><td class="cell pass">✓</td></tr><tr><td class="rule-col">must not replace simple words with sophisticated ones</td><td class="cell pass">✓</td><td class="cell pass">✓</td></tr><tr><td class="rule-col">must not change the user's opinion</td><td class="cell pass">✓</td><td class="cell pass">✓</td></tr><tr><td class="rule-col">must not remove uncertainty or hedging</td><td class="cell pass">✓</td><td class="cell pass">✓</td></tr><tr><td class="rule-col">must not change numbers, dates or names</td><td class="cell pass">✓</td><td class="cell pass">✓</td></tr><tr><td class="rule-col">must not turn short messages into essays</td><td class="cell pass">✓</td><td class="cell pass">✓</td></tr><tr><td class="rule-col">must not restructure entire paragraphs</td><td class="cell pass">✓</td><td class="cell pass">✓</td></tr><tr><td class="rule-col">must not censor informal language or profanity</td><td class="cell pass">✓</td><td class="cell pass">✓</td></tr></table></div></section>
+  <section><h2>Per-case detail</h2><div class="case">
+  <div class="case-head"><span class="case-name">removes-um-uh</span><span class="case-rule">remove speech fillers</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>um so I uh went to the store</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>um so I uh went to the store</code></td>
+  <td><span class="chip fail">still contains "um" · still contains "uh"</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>So I went to the store</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.67 ms</td>
+</tr></table>
+</div>
+<div class="case">
+  <div class="case-head"><span class="case-name">removes-you-know</span><span class="case-rule">remove speech fillers</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>this is you know pretty solid work</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>this is you know pretty solid work</code></td>
+  <td><span class="chip fail">still contains "you know"</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>This is pretty solid work</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.52 ms</td>
+</tr></table>
+</div>
+<div class="case">
+  <div class="case-head"><span class="case-name">removes-filler-like</span><span class="case-rule">remove 'like' as filler</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>it was like really far from the station</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>it was like really far from the station</code></td>
+  <td><span class="chip fail">still contains "like"</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>It was like really far from the station</code></td>
+  <td><span class="chip fail">still contains "like"</span></td>
+  <td class="lat">0.49 ms</td>
+</tr></table>
+</div>
+<div class="case">
+  <div class="case-head"><span class="case-name">keeps-real-like</span><span class="case-rule">preserve 'like' when not filler</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>I really like this song</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>I really like this song</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>I really like this song</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.47 ms</td>
+</tr></table>
+</div>
+<div class="case">
+  <div class="case-head"><span class="case-name">removes-doubled-word</span><span class="case-rule">remove accidental repetitions</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>send the the document</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>send the the document</code></td>
+  <td><span class="chip fail">still contains "the the"</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>Send the document</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.43 ms</td>
+</tr></table>
+</div>
+<div class="case">
+  <div class="case-head"><span class="case-name">removes-repeated-phrase</span><span class="case-rule">remove accidental repetitions</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>I think I think we should go</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>I think I think we should go</code></td>
+  <td><span class="chip fail">still contains "I think I think"</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>I think I think we should go</code></td>
+  <td><span class="chip fail">still contains "I think I think"</span></td>
+  <td class="lat">0.44 ms</td>
+</tr></table>
+</div>
+<div class="case">
+  <div class="case-head"><span class="case-name">repairs-false-start</span><span class="case-rule">repair false starts</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>Can you, actually, could you send it tomorrow?</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>Can you, actually, could you send it tomorrow?</code></td>
+  <td><span class="chip fail">still contains "can you, actually"</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>Can you, actually, could you send it tomorrow?</code></td>
+  <td><span class="chip fail">still contains "can you, actually"</span></td>
+  <td class="lat">0.44 ms</td>
+</tr></table>
+</div>
+<div class="case">
+  <div class="case-head"><span class="case-name">adds-punctuation</span><span class="case-rule">add punctuation</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>hello how are you doing today</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>hello how are you doing today</code></td>
+  <td><span class="chip fail">does not end in sentence punctuation</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>Hello how are you doing today</code></td>
+  <td><span class="chip fail">does not end in sentence punctuation</span></td>
+  <td class="lat">0.43 ms</td>
+</tr></table>
+</div>
+<div class="case">
+  <div class="case-head"><span class="case-name">capitalizes-sentences</span><span class="case-rule">capitalize sentences</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>hello there. how are you</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>hello there. how are you</code></td>
+  <td><span class="chip fail">dropped "How"</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>Hello there. How are you</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.43 ms</td>
+</tr></table>
+</div>
+<div class="case">
+  <div class="case-head"><span class="case-name">capitalizes-proper-nouns</span><span class="case-rule">capitalize proper nouns</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>i talked to sarah about the london trip</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>i talked to sarah about the london trip</code></td>
+  <td><span class="chip fail">dropped "Sarah" · dropped "London"</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>I talked to sarah about the london trip</code></td>
+  <td><span class="chip fail">dropped "Sarah" · dropped "London"</span></td>
+  <td class="lat">0.44 ms</td>
+</tr></table>
+</div>
+<div class="case">
+  <div class="case-head"><span class="case-name">light-grammar</span><span class="case-rule">make light grammatical corrections</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>he go to the office every day</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>he go to the office every day</code></td>
+  <td><span class="chip fail">dropped "goes"</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>He go to the office every day</code></td>
+  <td><span class="chip fail">dropped "goes"</span></td>
+  <td class="lat">0.40 ms</td>
+</tr></table>
+</div>
+<div class="case">
+  <div class="case-head"><span class="case-name">normalizes-spacing</span><span class="case-rule">normalize spacing</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>hello    world   there</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>hello    world   there</code></td>
+  <td><span class="chip fail">still contains "  "</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>Hello world there</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.39 ms</td>
+</tr></table>
+</div>
+<div class="case">
+  <div class="case-head"><span class="case-name">spoken-comma</span><span class="case-rule">convert spoken punctuation</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>wait comma what did you say</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>wait comma what did you say</code></td>
+  <td><span class="chip fail">still contains "comma" · dropped ","</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>Wait comma what did you say</code></td>
+  <td><span class="chip fail">still contains "comma" · dropped ","</span></td>
+  <td class="lat">0.48 ms</td>
+</tr></table>
+</div>
+<div class="case">
+  <div class="case-head"><span class="case-name">spoken-full-stop</span><span class="case-rule">convert spoken punctuation</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>that is all full stop</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>that is all full stop</code></td>
+  <td><span class="chip fail">still contains "full stop" · dropped "."</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>That is all full stop</code></td>
+  <td><span class="chip fail">still contains "full stop" · dropped "."</span></td>
+  <td class="lat">0.41 ms</td>
+</tr></table>
+</div>
+<div class="case">
+  <div class="case-head"><span class="case-name">spoken-new-paragraph</span><span class="case-rule">convert spoken punctuation</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>first idea new paragraph second idea</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>first idea new paragraph second idea</code></td>
+  <td><span class="chip fail">still contains "new paragraph" · missing paragraph break</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>First idea new paragraph second idea</code></td>
+  <td><span class="chip fail">still contains "new paragraph" · missing paragraph break</span></td>
+  <td class="lat">0.39 ms</td>
+</tr></table>
+</div>
+<div class="case">
+  <div class="case-head"><span class="case-name">preserves-tone</span><span class="case-rule">preserve the user's tone and vocabulary</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>yeah that's gonna be super cool</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>yeah that's gonna be super cool</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>Yeah that's gonna be super cool</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.38 ms</td>
+</tr></table>
+</div>
+<div class="case">
+  <div class="case-head"><span class="case-name">no-summarize</span><span class="case-rule">must not summarize</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>we should ship the feature next week but I am worried about the tests and we still need to tell the customer</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>we should ship the feature next week but I am worried about the tests and we still need to tell the customer</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>We should ship the feature next week but I am worried about the tests and we still need to tell the customer</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.42 ms</td>
+</tr></table>
+</div>
+<div class="case">
+  <div class="case-head"><span class="case-name">no-add-info</span><span class="case-rule">must not add new information</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>send the report to the team</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>send the report to the team</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>Send the report to the team</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.37 ms</td>
+</tr></table>
+</div>
+<div class="case">
+  <div class="case-head"><span class="case-name">no-formalize</span><span class="case-rule">must not make the writing more formal</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>I wanna grab lunch soon</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>I wanna grab lunch soon</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>I wanna grab lunch soon</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.37 ms</td>
+</tr></table>
+</div>
+<div class="case">
+  <div class="case-head"><span class="case-name">no-elevate-vocab</span><span class="case-rule">must not replace simple words with sophisticated ones</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>the food was good</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>the food was good</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>The food was good</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.37 ms</td>
+</tr></table>
+</div>
+<div class="case">
+  <div class="case-head"><span class="case-name">no-change-opinion</span><span class="case-rule">must not change the user's opinion</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>I think the new design is bad</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>I think the new design is bad</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>I think the new design is bad</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.37 ms</td>
+</tr></table>
+</div>
+<div class="case">
+  <div class="case-head"><span class="case-name">keeps-hedging</span><span class="case-rule">must not remove uncertainty or hedging</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>I think maybe we should wait a bit</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>I think maybe we should wait a bit</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>I think maybe we should wait a bit</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.38 ms</td>
+</tr></table>
+</div>
+<div class="case">
+  <div class="case-head"><span class="case-name">keeps-numbers-dates-names</span><span class="case-rule">must not change numbers, dates or names</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>meet Raj at 3 pm on the 5th</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>meet Raj at 3 pm on the 5th</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>Meet Raj at 3 pm on the 5th</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.38 ms</td>
+</tr></table>
+</div>
+<div class="case">
+  <div class="case-head"><span class="case-name">no-essay</span><span class="case-rule">must not turn short messages into essays</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>ok sounds good</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>ok sounds good</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>Ok sounds good</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.36 ms</td>
+</tr></table>
+</div>
+<div class="case">
+  <div class="case-head"><span class="case-name">no-restructure</span><span class="case-rule">must not restructure entire paragraphs</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>the build is broken. I will fix it after lunch</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>the build is broken. I will fix it after lunch</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>The build is broken. I will fix it after lunch</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.37 ms</td>
+</tr></table>
+</div>
+<div class="case">
+  <div class="case-head"><span class="case-name">no-censor-profanity</span><span class="case-rule">must not censor informal language or profanity</span></div>
+  <div class="case-in"><span class="in-label">in</span><code>this is fucking brilliant work</code></div>
+  <table class="io"><tr><th>Model</th><th>Output</th><th>Verdict</th><th>Latency</th></tr><tr>
+  <td class="m">Raw (no cleanup)</td>
+  <td class="out"><code>this is fucking brilliant work</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.00 ms</td>
+</tr><tr>
+  <td class="m">Deterministic</td>
+  <td class="out"><code>This is fucking brilliant work</code></td>
+  <td><span class="chip pass">pass</span></td>
+  <td class="lat">0.39 ms</td>
+</tr></table>
+</div></section>
+</main>
+</body>
+</html>

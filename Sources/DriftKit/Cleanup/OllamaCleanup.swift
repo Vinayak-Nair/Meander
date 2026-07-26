@@ -12,12 +12,15 @@ public struct OllamaCleanup: CleanupProvider {
     let model: String
     let tone: String?
     let vocabulary: [String]
+    let destination: String?
 
-    public init(baseURL: String, model: String, tone: String? = nil, vocabulary: [String] = []) {
+    public init(baseURL: String, model: String, tone: String? = nil,
+                vocabulary: [String] = [], destination: String? = nil) {
         self.baseURL = baseURL
         self.model = model
         self.tone = tone
         self.vocabulary = vocabulary
+        self.destination = destination
     }
 
     public func clean(_ text: String, language: Language) async throws -> String {
@@ -32,7 +35,7 @@ public struct OllamaCleanup: CleanupProvider {
 
         let body: [String: Any] = [
             "model": model,
-            "system": CleanupPrompt.system(for: language, tone: tone, vocabulary: vocabulary),
+            "system": CleanupPrompt.system(for: language, tone: tone, vocabulary: vocabulary, destination: destination),
             "prompt": text,
             "stream": false,
             "options": ["temperature": 0.2],

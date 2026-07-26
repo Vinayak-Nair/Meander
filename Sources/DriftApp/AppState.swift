@@ -41,6 +41,11 @@ final class AppState: ObservableObject {
     /// waveform so it reflects the actual content of your voice, not just volume.
     @Published private(set) var audioSpectrum: [Double] = Array(repeating: 0, count: 24)
     @Published private(set) var transcriptHistory: [TranscriptEntry]
+    /// Lifetime tallies that survive the 100-entry trim on `transcriptHistory`,
+    /// so the dashboard hero reflects true cumulative usage instead of only the
+    /// most recent window of transcripts.
+    @Published private(set) var lifetimeDictations: Int
+    @Published private(set) var lifetimeWords: Int
     @Published private(set) var recentTargetApps: [TargetApp]
     @Published private(set) var availableMicrophones: [AudioInputDevice]
     @Published private(set) var selectedMicrophoneID: String
@@ -57,9 +62,6 @@ final class AppState: ObservableObject {
     @Published var openAIKey: String { didSet { settings.openAIKey = openAIKey } }
     @Published var ollamaBaseURL: String { didSet { settings.ollamaBaseURL = ollamaBaseURL } }
     @Published var ollamaModel: String { didSet { settings.ollamaModel = ollamaModel } }
-    @Published var indicConformerPythonPath: String { didSet { settings.indicConformerPythonPath = indicConformerPythonPath } }
-    @Published var indicConformerModelID: String { didSet { settings.indicConformerModelID = indicConformerModelID } }
-    @Published var indicConformerDecoder: String { didSet { settings.indicConformerDecoder = indicConformerDecoder } }
     @Published var customVocabularyRaw: String { didSet { settings.customVocabularyRaw = customVocabularyRaw } }
     @Published private(set) var transcriptionBackendID: String
     @Published private(set) var modelVariant: String
@@ -69,8 +71,10 @@ final class AppState: ObservableObject {
     private var pipeline: Pipeline?
     private let hotkey = Hotkey()
     private var onboardingWindow: NSWindow?
-    private var settingsWindow: NSWindow?
     private var overlayWindow: NSPanel?
+    /// The selected sidebar tab in the main window. Lives here (not as local
+    /// view state) so the menu bar can navigate straight to a section.
+    @Published var dashboardSection: DashboardView.Section = .home
     /// Terms shown in the "Added to dictionary" toast (empty = no toast).
     @Published private(set) var learnedToastTerms: [String] = []
     private var learnedToastWindow: NSPanel?
@@ -82,11 +86,14 @@ final class AppState: ObservableObject {
     private var longLoadWatchdog: Task<Void, Never>?
     private let transcriptHistoryKey = "transcriptHistory"
     private let transcriptHistoryLimit = 100
+    private let lifetimeDictationsKey = "lifetimeDictations"
+    private let lifetimeWordsKey = "lifetimeWords"
     private let recentAppsKey = "recentTargetApps"
     private let recentAppsLimit = 12
-    /// Bundle id of the app frontmost when the current dictation started; drives
-    /// the per-app formatting profile applied at paste time.
-    private var currentTargetBundleID: String?
+    /// The app frontmost when the current dictation started (bundle id, name,
+    /// and focused window title); drives the per-app formatting profile and the
+    /// destination hint handed to LLM cleanup.
+    private var currentTarget: DictationTarget?
     /// Learns dictionary terms from corrections the user makes after pasting.
     private let correctionWatcher = CorrectionWatcher()
 
@@ -102,13 +109,12 @@ final class AppState: ObservableObject {
         openAIKey = s.openAIKey
         ollamaBaseURL = s.ollamaBaseURL
         ollamaModel = s.ollamaModel
-        indicConformerPythonPath = s.indicConformerPythonPath
-        indicConformerModelID = s.indicConformerModelID
-        indicConformerDecoder = s.indicConformerDecoder
         customVocabularyRaw = s.customVocabularyRaw
         transcriptionBackendID = s.transcriptionBackendID
         modelVariant = s.modelVariant
-        transcriptHistory = Self.loadTranscriptHistory()
+        let loadedHistory = Self.loadTranscriptHistory()
+        transcriptHistory = loadedHistory
+        (lifetimeDictations, lifetimeWords) = Self.loadLifetimeTotals(seedFrom: loadedHistory)
         recentTargetApps = Self.loadRecentTargetApps()
 
         let devices = AudioInputDevices.available()
@@ -130,6 +136,9 @@ final class AppState: ObservableObject {
     func bootstrap() async {
         refreshPermissions()
         refreshSelectedMicrophone()
+        // Register the MLX on-device LLM cleanup provider (no-op if its model
+        // isn't downloaded) and warm it so the first dictation isn't cold.
+        MLXBridge.register(modelsRoot: modelManager.modelsDirectory)
         let ready = settings.hasCompletedOnboarding && micGranted
             && accessibilityGranted && inputMonitoringGranted && modelManager.isDefaultModelDownloaded
         if !inputMonitoringGranted {
@@ -267,8 +276,8 @@ final class AppState: ObservableObject {
                 return
             }
             let text = streaming
-                ? try await pipeline.stopStreamingAndProcess(targetBundleID: currentTargetBundleID)
-                : try await pipeline.stopAndProcess(targetBundleID: currentTargetBundleID)
+                ? try await pipeline.stopStreamingAndProcess(target: currentTarget)
+                : try await pipeline.stopAndProcess(target: currentTarget)
             hideLiveOverlay()
             status = .idle
             if text.isEmpty {
@@ -444,27 +453,21 @@ final class AppState: ObservableObject {
         var options: [DictationModelOption] = [
             DictationModelOption(
                 id: TranscriptionBackend.fluidAudioEnglish.id,
-                displayName: "Parakeet v3 — English (fastest)",
+                displayName: "Parakeet v3, English (fastest)",
                 backendID: TranscriptionBackend.fluidAudioEnglish.id,
                 variant: nil
             ),
             DictationModelOption(
                 id: TranscriptionBackend.nemotronEnglish.id,
-                displayName: "Nemotron 0.6B — English (streaming, beta)",
+                displayName: "Nemotron 0.6B, English (streaming, beta)",
                 backendID: TranscriptionBackend.nemotronEnglish.id,
-                variant: nil
-            ),
-            DictationModelOption(
-                id: TranscriptionBackend.indicConformer.id,
-                displayName: "AI4Bharat IndicConformer — Indic languages",
-                backendID: TranscriptionBackend.indicConformer.id,
                 variant: nil
             )
         ]
         for option in ModelCatalog.options {
             options.append(DictationModelOption(
                 id: "whisperKit:\(option.id)",
-                displayName: "Whisper \(option.displayName)",
+                displayName: "Whisper \(option.displayName), multilingual",
                 backendID: TranscriptionBackend.whisperKit.id,
                 variant: option.id
             ))
@@ -476,7 +479,6 @@ final class AppState: ObservableObject {
         switch transcriptionBackend {
         case .fluidAudioEnglish: return TranscriptionBackend.fluidAudioEnglish.id
         case .nemotronEnglish: return TranscriptionBackend.nemotronEnglish.id
-        case .indicConformer: return TranscriptionBackend.indicConformer.id
         case .whisperKit: return "whisperKit:\(modelVariant)"
         }
     }
@@ -557,29 +559,18 @@ final class AppState: ObservableObject {
         let host = NSHostingController(rootView: OnboardingView().environmentObject(self))
         let window = NSWindow(contentViewController: host)
         window.title = "Welcome to Drift"
-        window.styleMask = [.titled, .closable]
-        window.setContentSize(NSSize(width: 520, height: 600))
+        window.styleMask = [.titled, .closable, .fullSizeContentView]
+        // Seamless light chrome: let the warm paper background flow up into the
+        // title bar, and force a light (Aqua) appearance so the traffic lights and
+        // titlebar read correctly on the cream backdrop regardless of system theme.
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isMovableByWindowBackground = true
+        window.appearance = NSAppearance(named: .aqua)
+        window.setContentSize(NSSize(width: 520, height: 640))
         window.isReleasedWhenClosed = false
         window.center()
         onboardingWindow = window
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
-    }
-
-    func showSettingsWindow() {
-        if let settingsWindow {
-            NSApp.activate(ignoringOtherApps: true)
-            settingsWindow.makeKeyAndOrderFront(nil)
-            return
-        }
-        let host = NSHostingController(rootView: SettingsView().environmentObject(self))
-        let window = NSWindow(contentViewController: host)
-        window.title = "Drift Settings"
-        window.styleMask = [.titled, .closable]
-        window.setContentSize(NSSize(width: 480, height: 540))
-        window.isReleasedWhenClosed = false
-        window.center()
-        settingsWindow = window
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
     }
@@ -693,8 +684,6 @@ final class AppState: ObservableObject {
         switch transcriptionBackend {
         case .fluidAudioEnglish, .nemotronEnglish:
             return [.english]
-        case .indicConformer:
-            return Language.indicConformerLanguages
         case .whisperKit:
             return Language.whisperKitLanguages
         }
@@ -711,8 +700,6 @@ final class AppState: ObservableObject {
         switch transcriptionBackend {
         case .fluidAudioEnglish, .nemotronEnglish:
             return "Download the English speech model"
-        case .indicConformer:
-            return "Prepare the AI4Bharat worker"
         case .whisperKit:
             return "Download the speech model"
         }
@@ -724,10 +711,8 @@ final class AppState: ObservableObject {
             return "A one-time FluidAudio Parakeet v3 download for fast, local dictation."
         case .nemotronEnglish:
             return "A one-time Nemotron 0.6B streaming model download (English). Prototype for evaluating streaming latency."
-        case .indicConformer:
-            return "Uses a local Python worker for AI4Bharat IndicConformer. Accept the gated Hugging Face model and install the Python dependencies first."
         case .whisperKit:
-            return "A one-time download of the multilingual Whisper model. Supports English plus Hindi, Tamil, Malayalam, Kannada, Telugu, and more."
+            return "A one-time download of the multilingual Whisper model. Fully on-device. Supports English, Indian languages (Hindi, Tamil, Malayalam, Kannada, Telugu, and more), plus major world languages."
         }
     }
 
@@ -744,8 +729,6 @@ final class AppState: ObservableObject {
         switch transcriptionBackend {
         case .fluidAudioEnglish, .nemotronEnglish:
             fallback = .english
-        case .indicConformer:
-            fallback = .hindi
         case .whisperKit:
             fallback = .auto
         }
@@ -789,6 +772,9 @@ final class AppState: ObservableObject {
     func clearTranscriptHistory() {
         transcriptHistory.removeAll()
         persistTranscriptHistory()
+        lifetimeDictations = 0
+        lifetimeWords = 0
+        persistLifetimeTotals()
     }
 
     func copyTranscript(_ entry: TranscriptEntry) {
@@ -804,16 +790,41 @@ final class AppState: ObservableObject {
     // MARK: Per-app formatting
 
     /// Remembers which app is frontmost as a dictation begins — that's the app the
-    /// text will paste into, so it drives the formatting profile.
+    /// text will paste into, so it drives the formatting profile. For browsers and
+    /// terminals the focused window title is captured too, so Drift can tell a
+    /// Gmail tab from a Claude tab, or a `claude`/`codex` session from a shell.
     private func captureTargetApp() {
         guard let app = NSWorkspace.shared.frontmostApplication,
               let bundleID = app.bundleIdentifier,
               bundleID != Bundle.main.bundleIdentifier else {
-            currentTargetBundleID = nil
+            currentTarget = nil
             return
         }
-        currentTargetBundleID = bundleID
-        recordTargetApp(bundleID: bundleID, name: app.localizedName ?? bundleID)
+        let name = app.localizedName ?? bundleID
+        let title = DestinationDetector.wantsWindowTitle(bundleID: bundleID)
+            ? focusedWindowTitle(of: app) : nil
+        currentTarget = DictationTarget(bundleID: bundleID, appName: name, windowTitle: title)
+        recordTargetApp(bundleID: bundleID, name: name)
+        // Surface the detected destination (Gmail, Claude Code…) in the dashboard
+        // list too, so its profile can be tuned like any real app's.
+        if let destination = DestinationDetector.detect(bundleID: bundleID, windowTitle: title) {
+            recordTargetApp(bundleID: destination.id, name: destination.name)
+        }
+    }
+
+    /// Reads the app's focused window title via Accessibility (a permission
+    /// Drift already requires for pasting). Only called for browsers and
+    /// terminals, where the title reveals the actual destination.
+    private func focusedWindowTitle(of app: NSRunningApplication) -> String? {
+        let ax = AXUIElementCreateApplication(app.processIdentifier)
+        var windowRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(ax, kAXFocusedWindowAttribute as CFString, &windowRef) == .success,
+              let window = windowRef, CFGetTypeID(window) == AXUIElementGetTypeID() else { return nil }
+        var titleRef: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(window as! AXUIElement, kAXTitleAttribute as CFString, &titleRef) == .success else {
+            return nil
+        }
+        return titleRef as? String
     }
 
     private func recordTargetApp(bundleID: String, name: String) {
@@ -870,6 +881,14 @@ final class AppState: ObservableObject {
         return NSWorkspace.shared.icon(forFile: url.path)
     }
 
+    /// SF Symbol fallback for entries without an app icon: detected web and CLI
+    /// destinations get a hint of what they are.
+    func appSymbol(forBundleID id: String) -> String {
+        if id.hasPrefix("web.") { return "globe" }
+        if id.hasPrefix("cli.") { return "terminal" }
+        return "app.dashed"
+    }
+
     private static func loadRecentTargetApps() -> [TargetApp] {
         guard let data = UserDefaults.standard.data(forKey: "recentTargetApps"),
               let decoded = try? JSONDecoder().decode([TargetApp].self, from: data) else {
@@ -890,6 +909,16 @@ final class AppState: ObservableObject {
             transcriptHistory.removeLast(transcriptHistory.count - transcriptHistoryLimit)
         }
         persistTranscriptHistory()
+
+        lifetimeDictations += 1
+        lifetimeWords += Self.wordCount(text)
+        persistLifetimeTotals()
+    }
+
+    /// Counts words the same way the dashboard does, so the hero total and any
+    /// per-entry counts stay consistent.
+    static func wordCount(_ text: String) -> Int {
+        text.split(whereSeparator: { $0.isWhitespace || $0.isNewline }).count
     }
 
     private static func loadTranscriptHistory() -> [TranscriptEntry] {
@@ -903,5 +932,26 @@ final class AppState: ObservableObject {
     private func persistTranscriptHistory() {
         guard let data = try? JSONEncoder().encode(transcriptHistory) else { return }
         UserDefaults.standard.set(data, forKey: transcriptHistoryKey)
+    }
+
+    /// Loads the persisted lifetime tallies. On first run after this feature
+    /// shipped there is no stored value, so we seed from whatever history the
+    /// user already has rather than starting them at zero.
+    private static func loadLifetimeTotals(seedFrom history: [TranscriptEntry]) -> (dictations: Int, words: Int) {
+        let defaults = UserDefaults.standard
+        if defaults.object(forKey: "lifetimeDictations") == nil {
+            let seededDictations = history.count
+            let seededWords = history.reduce(0) { $0 + wordCount($1.text) }
+            defaults.set(seededDictations, forKey: "lifetimeDictations")
+            defaults.set(seededWords, forKey: "lifetimeWords")
+            return (seededDictations, seededWords)
+        }
+        return (defaults.integer(forKey: "lifetimeDictations"),
+                defaults.integer(forKey: "lifetimeWords"))
+    }
+
+    private func persistLifetimeTotals() {
+        UserDefaults.standard.set(lifetimeDictations, forKey: lifetimeDictationsKey)
+        UserDefaults.standard.set(lifetimeWords, forKey: lifetimeWordsKey)
     }
 }

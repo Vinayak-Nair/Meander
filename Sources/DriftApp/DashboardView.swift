@@ -5,7 +5,6 @@ struct DashboardView: View {
     @EnvironmentObject var state: AppState
     @State private var appeared = false
     @State private var query = ""
-    @State private var section: Section = .home
     @State private var newTerm = ""
 
     enum Section: String, CaseIterable, Identifiable {
@@ -74,8 +73,8 @@ struct DashboardView: View {
     private var sidebar: some View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(Section.allCases) { s in
-                SideItem(title: s.rawValue, icon: s.icon, active: section == s) {
-                    withAnimation(.snappy(duration: 0.25)) { section = s }
+                SideItem(title: s.rawValue, icon: s.icon, active: state.dashboardSection == s) {
+                    withAnimation(.snappy(duration: 0.25)) { state.dashboardSection = s }
                 }
             }
             Spacer()
@@ -89,7 +88,7 @@ struct DashboardView: View {
     // MARK: Main content
 
     @ViewBuilder private var mainContent: some View {
-        switch section {
+        switch state.dashboardSection {
         case .home: homeView
         case .history: historyView
         case .apps: appsView
@@ -101,7 +100,7 @@ struct DashboardView: View {
     private var homeView: some View {
         let stats = DashboardStats(state.transcriptHistory)
         return VStack(spacing: 24) {
-            HeroCard(stats: stats, keyName: state.keyName(state.settings.pttKeyCode))
+            HeroCard(stats: stats, lifetimeWords: state.lifetimeWords, lifetimeDictations: state.lifetimeDictations, keyName: state.keyName(state.settings.pttKeyCode))
             activityCard(stats)
             recentSection
         }
@@ -116,7 +115,7 @@ struct DashboardView: View {
                     .font(.system(size: 17, weight: .bold, design: .rounded)).foregroundStyle(GF.ink)
                 Spacer()
                 if state.transcriptHistory.count > 3 {
-                    Button { withAnimation(.snappy(duration: 0.25)) { section = .history } } label: {
+                    Button { withAnimation(.snappy(duration: 0.25)) { state.dashboardSection = .history } } label: {
                         HStack(spacing: 3) { Text("See all"); Image(systemName: "arrow.right") }
                             .font(.system(size: 13, weight: .semibold)).foregroundStyle(GF.accent)
                     }.buttonStyle(.plain)
@@ -226,7 +225,7 @@ struct DashboardView: View {
                     Toggle("", isOn: $state.perAppProfilesEnabled).labelsHidden().toggleStyle(.switch).controlSize(.small)
                 }
                 if state.perAppProfilesEnabled {
-                    Text("Drift matches its style to the app you dictate into.")
+                    Text("Drift matches its style to where you dictate, including web apps like Gmail and AI tools like Claude or Codex.")
                         .font(.caption).foregroundStyle(GF.inkSecondary)
                     LightProfileRow(name: "Default", systemIcon: "asterisk.circle.fill", selection: $state.defaultProfileID)
                     ForEach(state.recentTargetApps.prefix(8)) { app in
@@ -378,10 +377,44 @@ struct DashboardView: View {
                 } else {
                     LightDetail(title: "Language", value: state.languageDisplayName)
                 }
-                LightDetail(title: "Cleanup", value: state.cleanupProviderDisplayName)
                 LightDetail(title: "Push-to-talk", value: state.keyName(state.settings.pttKeyCode))
             }
+
+            LightCard {
+                Text("Cleanup").font(.callout.weight(.semibold)).foregroundStyle(GF.ink)
+                Picker("Provider", selection: $state.cleanupProviderID) {
+                    ForEach(CleanupRegistry.all) { info in Text(info.displayName).tag(info.id) }
+                }.labelsHidden()
+
+                switch state.cleanupProviderID {
+                case "openai":
+                    lightField("Base URL", text: $state.openAIBaseURL)
+                    lightField("Model", text: $state.openAIModel)
+                    lightSecureField("API Key", text: $state.openAIKey)
+                    lightNote("Works with any OpenAI-compatible API: OpenAI, Groq, Sarvam, LM Studio.")
+                case "ollama":
+                    lightField("Base URL", text: $state.ollamaBaseURL)
+                    lightField("Model", text: $state.ollamaModel)
+                    lightNote("Requires Ollama running locally with the model pulled.")
+                case "none":
+                    lightNote("Text is inserted exactly as transcribed.")
+                default:
+                    lightNote("Fast, private formatting on your Mac. No setup, no network.")
+                }
+            }
         }
+    }
+
+    private func lightNote(_ text: String) -> some View {
+        Text(text).font(.caption).foregroundStyle(GF.inkSecondary).fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func lightField(_ title: String, text: Binding<String>) -> some View {
+        TextField(title, text: text).textFieldStyle(.roundedBorder)
+    }
+
+    private func lightSecureField(_ title: String, text: Binding<String>) -> some View {
+        SecureField(title, text: text).textFieldStyle(.roundedBorder)
     }
 
     private func hint(symbol: String, title: String, message: String) -> some View {
@@ -399,7 +432,10 @@ struct DashboardView: View {
 
 // MARK: - Palette
 
-private enum GF {
+/// The app's light design system — a white canvas with a GoFundMe-green brand
+/// accent. Internal (not private) so the onboarding flow wears the exact same
+/// language as the dashboard.
+enum GF {
     static let pageBG = Color.white
     static let sectionBG = Color(red: 0.953, green: 0.961, blue: 0.969)
     static let cardBG = Color.white
@@ -466,6 +502,8 @@ private struct SideItem: View {
 
 private struct HeroCard: View {
     let stats: DashboardStats
+    let lifetimeWords: Int
+    let lifetimeDictations: Int
     let keyName: String
 
     var body: some View {
@@ -475,7 +513,7 @@ private struct HeroCard: View {
 
                 VStack(spacing: 6) {
                     HStack(spacing: 6) {
-                        Text("\(stats.words.formatted()) words")
+                        Text("\(lifetimeWords.formatted()) words")
                             .font(.system(size: 34, weight: .bold, design: .rounded))
                             .foregroundStyle(GF.accentDeep)
                         Image(systemName: "chevron.right").font(.system(size: 18, weight: .bold)).foregroundStyle(GF.accentDeep.opacity(0.6))
@@ -489,7 +527,7 @@ private struct HeroCard: View {
                 }
 
                 HStack(spacing: 9) {
-                    HeroPill(value: stats.total.formatted(), label: "Dictations")
+                    HeroPill(value: lifetimeDictations.formatted(), label: "Dictations")
                     HeroPill(value: stats.week.formatted(), label: "This week")
                     HeroPill(value: "\(stats.streak)", label: stats.streak == 1 ? "Day streak" : "Day streak")
                 }
@@ -858,7 +896,8 @@ private struct LightAppRow: View {
             if let icon = state.appIcon(forBundleID: app.bundleID) {
                 Image(nsImage: icon).resizable().frame(width: 20, height: 20)
             } else {
-                Image(systemName: "app.dashed").foregroundStyle(GF.inkTertiary).frame(width: 20)
+                Image(systemName: state.appSymbol(forBundleID: app.bundleID))
+                    .foregroundStyle(GF.inkTertiary).frame(width: 20)
             }
             Text(app.name).font(.callout).foregroundStyle(GF.ink).lineLimit(1)
             Spacer()

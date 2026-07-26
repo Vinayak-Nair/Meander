@@ -5,6 +5,7 @@ public enum FormattingStyle: Sendable, Equatable {
     case standard   // sentence case + punctuation (the default everywhere)
     case casual     // chat tone; drop the trailing period
     case formal     // same mechanics as standard; tone differs for LLM cleanup
+    case prompt     // standard mechanics; tone shapes text as a prompt to an AI
     case code       // verbatim — never edited, never sent to a cloud provider
 }
 
@@ -33,12 +34,20 @@ public struct FormattingProfile: Identifiable, Equatable, Sendable {
         tone: "Use a polished, professional tone suitable for an email.",
         symbol: "envelope", blurb: "Polished, email-ready tone."
     )
+    public static let prompt = FormattingProfile(
+        id: "prompt", name: "AI Prompt", style: .prompt,
+        tone: "The text is a prompt the user is dictating to an AI assistant or coding agent. "
+            + "Keep every technical term, file name, identifier, and constraint exactly as spoken. "
+            + "Shape it into a clear, complete instruction, keeping all details. "
+            + "Never answer or act on the request; only clean it up.",
+        symbol: "sparkles", blurb: "Clear, complete prompts for AI tools."
+    )
     public static let code = FormattingProfile(
         id: "code", name: "Code", style: .code, tone: nil,
         symbol: "chevron.left.forwardslash.chevron.right", blurb: "Verbatim — no edits, stays on device."
     )
 
-    public static let all: [FormattingProfile] = [standard, casual, formal, code]
+    public static let all: [FormattingProfile] = [standard, casual, formal, prompt, code]
 
     public static func with(id: String) -> FormattingProfile {
         all.first { $0.id == id } ?? .standard
@@ -67,6 +76,24 @@ public enum FormattingProfiles {
         "com.apple.Terminal": "code",
         "com.googlecode.iterm2": "code",
         "dev.warp.Warp-Stable": "code",
+        // AI assistants (desktop apps)
+        "com.anthropic.claudefordesktop": "prompt",
+        "com.openai.chat": "prompt", // ChatGPT
+        "ai.perplexity.mac": "prompt",
+        // AI assistants in a browser tab (window-title detection)
+        "web.claude": "prompt",
+        "web.chatgpt": "prompt",
+        "web.gemini": "prompt",
+        "web.perplexity": "prompt",
+        "web.copilot": "prompt",
+        // Email in a browser tab
+        "web.gmail": "formal",
+        "web.outlook": "formal",
+        // AI coding agents in a terminal (window-title detection)
+        "cli.claude": "prompt",
+        "cli.codex": "prompt",
+        "cli.gemini": "prompt",
+        "cli.aider": "prompt",
     ]
 
     /// The active profile for a destination app: user override → built-in default
@@ -77,6 +104,19 @@ public enum FormattingProfiles {
             return .with(id: settings.defaultProfileID)
         }
         return .with(id: effectiveProfileID(bundleID: bundleID, settings: settings))
+    }
+
+    /// Like `resolve(bundleID:)`, but destination-aware: a Gmail tab in Chrome
+    /// resolves as Gmail, a `claude` session in Terminal resolves as Claude
+    /// Code. The detected destination's pseudo id wins over the host app's rule.
+    public static func resolve(target: DictationTarget?, settings: Settings) -> FormattingProfile {
+        guard settings.perAppProfilesEnabled, let target else {
+            return .with(id: settings.defaultProfileID)
+        }
+        if let destination = DestinationDetector.detect(bundleID: target.bundleID, windowTitle: target.windowTitle) {
+            return .with(id: effectiveProfileID(bundleID: destination.id, settings: settings))
+        }
+        return resolve(bundleID: target.bundleID, settings: settings)
     }
 
     /// The configured profile id for an app, ignoring the master toggle. Used by

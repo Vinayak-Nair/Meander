@@ -2,12 +2,12 @@ import Foundation
 
 /// Transcription engines Drift can use. Keep this separate from model variants:
 /// some engines expose multiple models, while FluidAudio is intentionally
-/// English-only for the current product focus.
+/// English-only for the current product focus. WhisperKit is the on-device
+/// multilingual engine (English, Indian languages, and international languages).
 public enum TranscriptionBackend: String, CaseIterable, Identifiable, Sendable {
     case fluidAudioEnglish = "fluidAudioEnglish"
     case nemotronEnglish = "nemotronEnglish"
     case whisperKit = "whisperKit"
-    case indicConformer = "indicConformer"
 
     public static let defaultBackend: TranscriptionBackend = .fluidAudioEnglish
 
@@ -21,8 +21,6 @@ public enum TranscriptionBackend: String, CaseIterable, Identifiable, Sendable {
             return "Nemotron English (streaming, beta)"
         case .whisperKit:
             return "WhisperKit Multilingual"
-        case .indicConformer:
-            return "AI4Bharat IndicConformer"
         }
     }
 
@@ -34,8 +32,6 @@ public enum TranscriptionBackend: String, CaseIterable, Identifiable, Sendable {
             return "Nemotron 0.6B (1120ms)"
         case .whisperKit:
             return nil
-        case .indicConformer:
-            return "IndicConformer 600M"
         }
     }
 
@@ -43,7 +39,7 @@ public enum TranscriptionBackend: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .fluidAudioEnglish, .nemotronEnglish:
             return false
-        case .whisperKit, .indicConformer:
+        case .whisperKit:
             return true
         }
     }
