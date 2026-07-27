@@ -22,7 +22,11 @@ command -v xcodegen >/dev/null 2>&1 || { echo "Run scripts/bootstrap.sh first." 
 xcodegen generate
 
 echo "==> Archiving"
+# mlx-swift ships a CudaBuild package plugin. Xcode's GUI asks once whether to
+# trust it; xcodebuild has no way to answer and fails, so validation is skipped
+# here. The plugin is inert on Apple silicon.
 xcodebuild -project Drift.xcodeproj -scheme "$SCHEME" -configuration "$CONFIG" \
+  -skipPackagePluginValidation -skipMacroValidation \
   -archivePath "$ARCHIVE" archive
 
 echo "==> Exporting app"
@@ -43,6 +47,22 @@ if [ -d "$MODEL_DIR" ]; then
 else
   echo "   (No model at $MODEL_DIR: shipping without a bundled model;"
   echo "    users will download it on first run. Set MODEL_CACHE to bundle it.)"
+fi
+
+# Bundle the MLX cleanup model. Unlike Parakeet there is no in-app download for
+# it, so if it isn't bundled the "On-device LLM" cleanup option silently falls
+# back to deterministic. Populate with scripts/fetch-eval-model.sh, or point
+# MLX_MODEL_CACHE at a directory containing the qwen2.5-0.5b-4bit folder.
+MLX_MODEL_CACHE="${MLX_MODEL_CACHE:-$PWD/eval/models}"
+MLX_MODEL_DIR="$MLX_MODEL_CACHE/qwen2.5-0.5b-4bit"
+if [ -d "$MLX_MODEL_DIR" ]; then
+  echo "==> Bundling MLX cleanup model from $MLX_MODEL_DIR"
+  MLX_DEST="$APP/Contents/Resources/BundledModels/mlx"
+  mkdir -p "$MLX_DEST"
+  cp -R "$MLX_MODEL_DIR" "$MLX_DEST/"
+else
+  echo "   (No MLX model at $MLX_MODEL_DIR: shipping without on-device LLM"
+  echo "    cleanup. Run scripts/fetch-eval-model.sh to populate it.)"
 fi
 
 if [ -n "${DEV_ID:-}" ]; then

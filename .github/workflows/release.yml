@@ -35,11 +35,15 @@ concurrency:
 
 jobs:
   release:
-    runs-on: macos-14
+    # macos-26: the MLX dependency's manifest needs swift-tools 6.1+, which the
+    # macos-14 image's newest Xcode (16.2) can't parse.
+    runs-on: macos-26
     timeout-minutes: 60
     env:
       MODEL_REPO: FluidInference/parakeet-tdt-0.6b-v3-coreml
       MODEL_DIR_NAME: parakeet-tdt-0.6b-v3
+      MLX_MODEL_REPO: mlx-community/Qwen2.5-0.5B-Instruct-4bit
+      MLX_MODEL_DIR_NAME: qwen2.5-0.5b-4bit
     steps:
       - uses: actions/checkout@v4
 
@@ -93,11 +97,31 @@ jobs:
           done
           du -sh "$MODEL"
 
+      - name: Cache MLX cleanup model
+        id: mlx-model-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/mlx
+          key: ${{ env.MLX_MODEL_REPO }}-${{ env.MLX_MODEL_DIR_NAME }}-v1
+
+      - name: Download MLX cleanup model
+        if: steps.mlx-model-cache.outputs.cache-hit != 'true'
+        run: ./scripts/fetch-eval-model.sh "$MLX_MODEL_REPO" "$RUNNER_TEMP/mlx/$MLX_MODEL_DIR_NAME"
+
+      - name: Verify MLX model present
+        run: |
+          MODEL="$RUNNER_TEMP/mlx/$MLX_MODEL_DIR_NAME"
+          for f in config.json tokenizer.json model.safetensors; do
+            test -s "$MODEL/$f" || { echo "::error::Missing $f in $MODEL"; ls -la "$MODEL" || true; exit 1; }
+          done
+          du -sh "$MODEL"
+
       - name: Build ad-hoc-signed DMG with bundled model
         env:
           # MODEL_CACHE points at the directory containing the model folder, which
           # is what scripts/release.sh copies into the app bundle.
           MODEL_CACHE: ${{ runner.temp }}/fluidaudio
+          MLX_MODEL_CACHE: ${{ runner.temp }}/mlx
         run: ./scripts/release.sh
 
       - name: Publish GitHub Release

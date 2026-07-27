@@ -7,7 +7,9 @@ on:
 
 jobs:
   build-test:
-    runs-on: macos-14
+    # macos-26: the MLX dependency's manifest needs swift-tools 6.1+, which the
+    # macos-14 image's newest Xcode (16.2) can't parse.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
 
@@ -22,5 +24,9 @@ jobs:
         run: |
           brew install xcodegen
           xcodegen generate
+          # mlx-swift ships a CudaBuild package plugin. Xcode's GUI asks once
+          # whether to trust it; xcodebuild has no way to answer and fails, so
+          # validation is skipped here. The plugin is inert on Apple silicon.
           xcodebuild -project Drift.xcodeproj -scheme Drift \
-            -configuration Debug CODE_SIGNING_ALLOWED=NO build
+            -configuration Debug CODE_SIGNING_ALLOWED=NO \
+            -skipPackagePluginValidation -skipMacroValidation build
