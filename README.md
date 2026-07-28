@@ -14,7 +14,7 @@ Hold a key, speak, and Drift types cleaned-up text into whatever app you're usin
 
 ## Install (for users)
 
-1. Download `Drift.dmg` from the [Releases](https://github.com/) page.
+1. Download `Drift.dmg` from the [Releases](https://github.com/Vinayak-Nair/Drift/releases/latest) page.
 2. Open it and drag **Drift** to your Applications folder.
 3. Open Drift. A small waveform icon appears in your menu bar.
 4. Follow the one-time setup: grant **Microphone** and **Accessibility**, and let the speech model download.
@@ -120,7 +120,7 @@ NOTARY_PROFILE="drift-notary" \
 
 Produces a signed, notarized `build/Drift.dmg`. Notarization needs a paid Apple Developer account; without one the script still builds an ad-hoc-signed DMG for local use.
 
-The release bundles the default English model (Parakeet v3, ~470 MB) inside the app so first-run dictation works instantly with no download. It's copied from your local model cache (`~/Library/Application Support/Drift/models/FluidAudio/parakeet-tdt-0.6b-v3`) — run the app once to populate it, or set `MODEL_CACHE` to a directory containing that folder. If no model is found, the DMG ships without one and users download it on first run (the previous behavior). The model is never committed to git. Multilingual Whisper models download on demand. IndicConformer downloads through the user's local Hugging Face/Python environment after access is accepted.
+The release bundles two models inside the app so first run works with no download: the default English speech model (Parakeet v3, ~470 MB) and the on-device cleanup model (Qwen2.5 0.5B 4-bit, ~276 MB). Parakeet is copied from your local model cache (`~/Library/Application Support/Drift/models/FluidAudio/parakeet-tdt-0.6b-v3`), so run the app once to populate it or set `MODEL_CACHE` to a directory containing that folder. The cleanup model comes from `eval/models/qwen2.5-0.5b-4bit` (run `scripts/fetch-eval-model.sh`) or `MLX_MODEL_CACHE`. Either model missing means the DMG ships without it: dictation falls back to downloading on first run, and the on-device LLM cleanup option falls back to the deterministic rules. Neither model is committed to git. Multilingual Whisper models download on demand.
 
 ### Automated releases (CI)
 
@@ -138,9 +138,8 @@ On a macOS GitHub runner the workflow archives the app, downloads and bundles th
 - [ ] App icon and a polished menu-bar status UI
 - [ ] Move the API key to the Keychain
 - [ ] Live partial-transcription overlay
-- [ ] Custom vocabulary and per-app formatting profiles
+- [x] Custom vocabulary and per-app formatting profiles
 - [ ] Sarvam and other Indian-language cleanup presets
-- [ ] Bundle or first-run-manage the IndicConformer Python runtime
 - [ ] Configurable push-to-talk key in Settings
 
 ## Credits

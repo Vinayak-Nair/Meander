@@ -20,8 +20,5 @@ Package.resolved
 # Eval model weights (fetch with scripts/fetch-eval-model.sh)
 eval/models/
 
-# Marketing site (separate repo)
-site/
-
 # Local Claude Code settings
 .claude/settings.local.json
