@@ -68,7 +68,7 @@ public final class Pipeline {
             try recorder.start()
             return
         }
-        await streaming.beginStream(onPartial: onPartial)
+        await streaming.beginStream { onPartial(TranscriptSanitizer.sanitize($0)) }
         recorder.onSamples = { samples in streaming.feed(samples) }
         do {
             try recorder.start()
@@ -88,7 +88,7 @@ public final class Pipeline {
         guard let streaming = transcriber as? StreamingTranscriber else { return "" }
 
         let raw = try await streaming.finishStream()
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = Self.sanitize(raw)
         guard !trimmed.isEmpty else { return "" }
 
         return await clean(trimmed, target: target)
@@ -110,10 +110,23 @@ public final class Pipeline {
             format: "audio %.0fms · transcribe %.0fms (RTF %.2f)",
             audioMs, transcribeMs, audioMs > 0 ? transcribeMs / audioMs : 0
         ))
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = Self.sanitize(raw)
         guard !trimmed.isEmpty else { return "" }
 
         return await clean(trimmed, target: target)
+    }
+
+    /// Strips the engine's control tokens before any layer treats them as words,
+    /// and logs when there were any: a transcript containing them is a failed
+    /// decode, and the log is the only place that shows it once the text is gone.
+    private static func sanitize(_ raw: String) -> String {
+        let text = TranscriptSanitizer.sanitize(raw)
+        if TranscriptSanitizer.containsControlTokens(raw) {
+            LatencyLog.record(
+                "transcript: control tokens stripped (\(raw.count)→\(text.count) chars)"
+            )
+        }
+        return text
     }
 
     /// Cleans transcript text using the formatting profile for the destination app
