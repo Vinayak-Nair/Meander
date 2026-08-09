@@ -1,10 +1,10 @@
 name: Release
 
-# Build and publish a signed (ad-hoc) Drift.dmg whenever a v* tag is pushed.
+# Build and publish a signed (ad-hoc) Meander.dmg whenever a v* tag is pushed.
 # The DMG bundles the Parakeet v3 model so first-run dictation needs no download,
 # and is attached to a GitHub Release marked "latest" — which is exactly the URL
 # the landing page's download button points at:
-#   https://github.com/Vinayak-Nair/Drift/releases/latest/download/Drift.dmg
+#   https://github.com/Vinayak-Nair/Meander/releases/latest/download/Meander.dmg
 #
 # Cut a release with:
 #   git tag v0.2.0 && git push origin v0.2.0
@@ -133,21 +133,21 @@ jobs:
         run: |
           TAG="${{ steps.meta.outputs.tag }}"
           PRERELEASE="${{ github.event.inputs.prerelease || 'false' }}"
-          test -f build/Drift.dmg || { echo "::error::build/Drift.dmg not found"; exit 1; }
+          test -f build/Meander.dmg || { echo "::error::build/Meander.dmg not found"; exit 1; }
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists — replacing the DMG asset."
-            gh release upload "$TAG" build/Drift.dmg --clobber
+            gh release upload "$TAG" build/Meander.dmg --clobber
           elif [ "$PRERELEASE" = "true" ]; then
             echo "Publishing $TAG as a prerelease (not marked latest)."
-            gh release create "$TAG" build/Drift.dmg \
-              --title "Drift $TAG" \
+            gh release create "$TAG" build/Meander.dmg \
+              --title "Meander $TAG" \
               --notes-file .github/release-body.md \
               --generate-notes \
               --prerelease \
               --latest=false
           else
-            gh release create "$TAG" build/Drift.dmg \
-              --title "Drift $TAG" \
+            gh release create "$TAG" build/Meander.dmg \
+              --title "Meander $TAG" \
               --notes-file .github/release-body.md \
               --generate-notes \
               --latest

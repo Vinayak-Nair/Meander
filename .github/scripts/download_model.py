@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Download the Parakeet CoreML model subset that Drift bundles in releases.
+"""Download the Parakeet CoreML model subset that Meander bundles in releases.
 
 This mirrors what FluidAudio's `AsrModels.downloadAndLoad` lays down in the local
 model cache, so `scripts/release.sh` can copy it into the app bundle. The HF repo

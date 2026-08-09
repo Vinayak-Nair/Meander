@@ -1,22 +1,22 @@
 #!/usr/bin/env bash
-# Builds a distributable Drift.dmg. Signs and notarizes when credentials are set.
+# Builds a distributable Meander.dmg. Signs and notarizes when credentials are set.
 #
 # One-time notarization setup:
-#   xcrun notarytool store-credentials drift-notary \
+#   xcrun notarytool store-credentials meander-notary \
 #     --apple-id "you@example.com" --team-id TEAMID --password APP_SPECIFIC_PW
 #
 # Then run:
 #   DEV_ID="Developer ID Application: Your Name (TEAMID)" \
-#   NOTARY_PROFILE="drift-notary" ./scripts/release.sh
+#   NOTARY_PROFILE="meander-notary" ./scripts/release.sh
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-SCHEME=Drift
+SCHEME=Meander
 CONFIG=Release
 BUILD=build
-ARCHIVE="$BUILD/Drift.xcarchive"
-APP="$BUILD/export/Drift.app"
-DMG="$BUILD/Drift.dmg"
+ARCHIVE="$BUILD/Meander.xcarchive"
+APP="$BUILD/export/Meander.app"
+DMG="$BUILD/Meander.dmg"
 
 command -v xcodegen >/dev/null 2>&1 || { echo "Run scripts/bootstrap.sh first." >&2; exit 1; }
 xcodegen generate
@@ -25,14 +25,14 @@ echo "==> Archiving"
 # mlx-swift ships a CudaBuild package plugin. Xcode's GUI asks once whether to
 # trust it; xcodebuild has no way to answer and fails, so validation is skipped
 # here. The plugin is inert on Apple silicon.
-xcodebuild -project Drift.xcodeproj -scheme "$SCHEME" -configuration "$CONFIG" \
+xcodebuild -project Meander.xcodeproj -scheme "$SCHEME" -configuration "$CONFIG" \
   -skipPackagePluginValidation -skipMacroValidation \
   -archivePath "$ARCHIVE" archive
 
 echo "==> Exporting app"
 mkdir -p "$BUILD/export"
 rm -rf "$APP"
-cp -R "$ARCHIVE/Products/Applications/Drift.app" "$BUILD/export/"
+cp -R "$ARCHIVE/Products/Applications/Meander.app" "$BUILD/export/"
 
 # Bundle the default English model (Parakeet v3) so first-run dictation needs no
 # download. Source defaults to the local model cache; run the app once to populate
@@ -41,7 +41,7 @@ cp -R "$ARCHIVE/Products/Applications/Drift.app" "$BUILD/export/"
 # v3 must match ModelManager.parakeetVersion. Only v3 exposes the joint top-K
 # outputs the decoder's script filter needs, so bundling v2 would be ignored at
 # load time and would drop the language guarantee.
-MODEL_CACHE="${MODEL_CACHE:-$HOME/Library/Application Support/Drift/models/FluidAudio}"
+MODEL_CACHE="${MODEL_CACHE:-$HOME/Library/Application Support/Meander/models/FluidAudio}"
 MODEL_DIR="$MODEL_CACHE/parakeet-tdt-0.6b-v3"
 if [ -d "$MODEL_DIR" ]; then
   echo "==> Bundling model from $MODEL_DIR"
@@ -82,7 +82,7 @@ rm -f "$DMG"
 # hdiutil can transiently fail with "Resource busy" when Spotlight/mdworker is
 # touching the source app (common on CI runners). Retry a few times.
 for attempt in 1 2 3 4 5; do
-  if hdiutil create -volname Drift -srcfolder "$APP" -ov -format UDZO "$DMG"; then
+  if hdiutil create -volname Meander -srcfolder "$APP" -ov -format UDZO "$DMG"; then
     break
   fi
   if [ "$attempt" = 5 ]; then

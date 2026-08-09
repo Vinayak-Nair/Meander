@@ -17,7 +17,7 @@ jobs:
         with:
           xcode-version: latest-stable
 
-      - name: Run DriftKit tests
+      - name: Run MeanderKit tests
         run: swift test
 
       - name: Generate project and build app
@@ -27,6 +27,6 @@ jobs:
           # mlx-swift ships a CudaBuild package plugin. Xcode's GUI asks once
           # whether to trust it; xcodebuild has no way to answer and fails, so
           # validation is skipped here. The plugin is inert on Apple silicon.
-          xcodebuild -project Drift.xcodeproj -scheme Drift \
+          xcodebuild -project Meander.xcodeproj -scheme Meander \
             -configuration Debug CODE_SIGNING_ALLOWED=NO \
             -skipPackagePluginValidation -skipMacroValidation build

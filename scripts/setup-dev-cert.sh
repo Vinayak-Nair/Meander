@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Creates a self-signed "Drift Dev" code-signing certificate in the login
+# Creates a self-signed "Meander Dev" code-signing certificate in the login
 # keychain (idempotent). Signing every local build with this stable identity
 # keeps the macOS Accessibility grant (needed for the global push-to-talk hotkey)
 # from being invalidated on every rebuild — which is what happens with the
@@ -12,7 +12,7 @@
 # Run once:  ./scripts/setup-dev-cert.sh
 set -euo pipefail
 
-CERT_NAME="Drift Dev"
+CERT_NAME="Meander Dev"
 KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
 
 if security find-identity -p codesigning | grep -q "\"$CERT_NAME\""; then
@@ -42,10 +42,10 @@ openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes \
   -keyout "$TMP/key.pem" -out "$TMP/cert.pem" -config "$TMP/cert.conf" 2>/dev/null
 
 openssl pkcs12 -export -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
-  -out "$TMP/cert.p12" -passout pass:drift -name "$CERT_NAME" 2>/dev/null
+  -out "$TMP/cert.p12" -passout pass:meander -name "$CERT_NAME" 2>/dev/null
 
 # -A lets codesign use the key without a per-build keychain prompt.
-security import "$TMP/cert.p12" -k "$KEYCHAIN" -P drift -A -T /usr/bin/codesign
+security import "$TMP/cert.p12" -k "$KEYCHAIN" -P meander -A -T /usr/bin/codesign
 
 echo "Created code-signing identity '$CERT_NAME'."
-echo "Now build with scripts/dev-run.sh and grant Accessibility to Drift once."
+echo "Now build with scripts/dev-run.sh and grant Accessibility to Meander once."

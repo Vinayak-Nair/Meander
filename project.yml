@@ -1,15 +1,15 @@
-# XcodeGen spec for the Drift macOS app.
+# XcodeGen spec for the Meander macOS app.
 # Generate the project with:  xcodegen generate   (see scripts/bootstrap.sh)
-# The app links DriftKit (and transitively WhisperKit) from the local Swift package.
-name: Drift
+# The app links MeanderKit (and transitively WhisperKit) from the local Swift package.
+name: Meander
 options:
-  bundleIdPrefix: com.drift
+  bundleIdPrefix: com.meander
   deploymentTarget:
     macOS: "14.0"
   createIntermediateGroups: true
 
 packages:
-  DriftKit:
+  MeanderKit:
     path: .
 
 settings:
@@ -23,34 +23,34 @@ settings:
     DEVELOPMENT_TEAM: ""
 
 targets:
-  Drift:
+  Meander:
     type: application
     platform: macOS
     sources:
-      - path: Sources/DriftApp
+      - path: Sources/MeanderApp
     dependencies:
-      - package: DriftKit
-        product: DriftKit
+      - package: MeanderKit
+        product: MeanderKit
       # On-device LLM cleanup (MLX). Built via xcodebuild so the Metal shader
       # library is compiled (plain `swift build` can't). Beta / measurement.
-      - package: DriftKit
-        product: DriftMLX
+      - package: MeanderKit
+        product: MeanderMLX
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.drift.app
-        PRODUCT_NAME: Drift
+        PRODUCT_BUNDLE_IDENTIFIER: com.meander.app
+        PRODUCT_NAME: Meander
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
-      path: Sources/DriftApp/Info.plist
+      path: Sources/MeanderApp/Info.plist
       properties:
-        CFBundleDisplayName: Drift
+        CFBundleDisplayName: Meander
         CFBundleShortVersionString: "0.1.0"
         CFBundleVersion: "1"
         LSMinimumSystemVersion: "14.0"
         # Standalone app with a Dock icon; the menu-bar extra stays as a quick control.
-        NSMicrophoneUsageDescription: "Drift records your voice to transcribe it into text."
+        NSMicrophoneUsageDescription: "Meander records your voice to transcribe it into text."
     entitlements:
-      path: Sources/DriftApp/Drift.entitlements
+      path: Sources/MeanderApp/Meander.entitlements
       properties:
         # Not sandboxed: a global push-to-talk key (CGEventTap) and pasting into
         # other apps require access the App Sandbox does not permit.

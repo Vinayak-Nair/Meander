@@ -1,13 +1,13 @@
-// Drift brand renderer — draws the luminous woven-strand waveform mark natively
+// Meander brand renderer — draws the luminous woven-strand waveform mark natively
 // with CoreGraphics so the logo matches the in-app LiveWaveform exactly.
 //
 //   swift render_assets.swift icon     <size> <out.png>
 //   swift render_assets.swift menubar  <size> <out.png>     (template: black on clear)
 //   swift render_assets.swift mark     <w> <h> <out.png>    (glow wave on transparent)
 //   swift render_assets.swift panel    <w> <h> <out.png>    (glow wave on dark panel)
-//   swift render_assets.swift lockup   <w> <h> <out.png>    (wave + "drift" on dark panel)
+//   swift render_assets.swift lockup   <w> <h> <out.png>    (wave + "meander" on dark panel)
 //
-// The strand math is a static frame of Sources/DriftApp/DesignSystem.swift's
+// The strand math is a static frame of Sources/MeanderApp/DesignSystem.swift's
 // LiveWaveform so the two stay visually identical.
 
 import Foundation
@@ -16,7 +16,7 @@ import ImageIO
 import UniformTypeIdentifiers
 import AppKit
 
-// MARK: - Colour palette (the Drift teal-cyan → deep blue brand)
+// MARK: - Colour palette (the Meander teal-cyan → deep blue brand)
 
 func rgb(_ r: Double, _ g: Double, _ b: Double, _ a: Double = 1) -> CGColor {
     CGColor(srgbRed: r, green: g, blue: b, alpha: a)
@@ -189,10 +189,10 @@ func strokeTileEdge(_ ctx: CGContext, _ rect: CGRect, _ S: CGFloat) {
 
 // MARK: - Modes
 
-let waveT = CGFloat(ProcessInfo.processInfo.environment["DRIFT_T"].flatMap { Double($0) } ?? 3.14)
-let waveAmp = CGFloat(ProcessInfo.processInfo.environment["DRIFT_AMP"].flatMap { Double($0) } ?? 0.62)
-let waveN = ProcessInfo.processInfo.environment["DRIFT_N"].flatMap { Int($0) } ?? 5
-let waveCL = (ProcessInfo.processInfo.environment["DRIFT_CL"] ?? "0") == "1"
+let waveT = CGFloat(ProcessInfo.processInfo.environment["MEANDER_T"].flatMap { Double($0) } ?? 3.14)
+let waveAmp = CGFloat(ProcessInfo.processInfo.environment["MEANDER_AMP"].flatMap { Double($0) } ?? 0.62)
+let waveN = ProcessInfo.processInfo.environment["MEANDER_N"].flatMap { Int($0) } ?? 5
+let waveCL = (ProcessInfo.processInfo.environment["MEANDER_CL"] ?? "0") == "1"
 
 func renderIcon(_ size: Int, _ out: String) {
     let ctx = makeContext(size, size)
@@ -270,7 +270,7 @@ func renderPanel(_ w: Int, _ h: Int, _ out: String, withText: Bool) {
             .foregroundColor: NSColor(srgbRed: 0.918, green: 0.984, blue: 0.965, alpha: 1),
             .kern: -fontSize * 0.02,
         ]
-        let str = NSAttributedString(string: "drift", attributes: attrs)
+        let str = NSAttributedString(string: "meander", attributes: attrs)
         let ns = NSGraphicsContext(cgContext: ctx, flipped: true)
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = ns
@@ -290,9 +290,9 @@ func renderPanel(_ w: Int, _ h: Int, _ out: String, withText: Bool) {
 // MARK: - Flowing ribbon mark (tapered, overlapping calligraphic waves)
 
 // The ribbon colorway. Blue → white reads on dark surfaces (app icon, panels);
-// DRIFT_RIBBON=light switches to periwinkle → deep indigo so the mark still stands
+// MEANDER_RIBBON=light switches to periwinkle → deep indigo so the mark still stands
 // out on a light surface such as the in-app top bar.
-let ribbonLightBG = (ProcessInfo.processInfo.environment["DRIFT_RIBBON"] ?? "dark") == "light"
+let ribbonLightBG = (ProcessInfo.processInfo.environment["MEANDER_RIBBON"] ?? "dark") == "light"
 let ribbonGlowColor = ribbonLightBG ? rgb(0.30, 0.34, 0.80, 0.28) : rgb(0.44, 0.52, 0.96, 0.5)
 
 func ribbonGrad(_ topA: CGFloat, _ botA: CGFloat) -> CGGradient {
@@ -405,7 +405,7 @@ func renderFlowPanel(_ w: Int, _ h: Int, _ out: String, withText: Bool) {
             .foregroundColor: NSColor(srgbRed: 0.93, green: 0.95, blue: 1.0, alpha: 1),
             .kern: -fontSize * 0.02,
         ]
-        let str = NSAttributedString(string: "drift", attributes: attrs)
+        let str = NSAttributedString(string: "meander", attributes: attrs)
         let ns = NSGraphicsContext(cgContext: ctx, flipped: true)
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = ns
@@ -509,7 +509,7 @@ func renderLinePanel(_ w: Int, _ h: Int, _ out: String, withText: Bool) {
             .foregroundColor: NSColor(srgbRed: 0.93, green: 0.95, blue: 1.0, alpha: 1),
             .kern: -fontSize * 0.02,
         ]
-        let str = NSAttributedString(string: "drift", attributes: attrs)
+        let str = NSAttributedString(string: "meander", attributes: attrs)
         let ns = NSGraphicsContext(cgContext: ctx, flipped: true)
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = ns
@@ -527,7 +527,7 @@ func renderLinePanel(_ w: Int, _ h: Int, _ out: String, withText: Bool) {
 // The mark is supplied as a transparent PNG (the designer's exact artwork) rather
 // than drawn. We trim its transparent margins and composite it for each asset so it
 // reproduces the source pixel-for-pixel.
-let srcPath = ProcessInfo.processInfo.environment["DRIFT_SRC"] ?? "Branding/drift-mark-source.png"
+let srcPath = ProcessInfo.processInfo.environment["MEANDER_SRC"] ?? "Branding/meander-mark-source.png"
 
 func loadTrimmedImage(_ path: String) -> (CGImage, CGRect) {
     guard let img = NSImage(contentsOfFile: path),
@@ -622,7 +622,7 @@ func renderImgPanel(_ w: Int, _ h: Int, _ out: String, withText: Bool) {
             .foregroundColor: NSColor(srgbRed: 0.93, green: 0.95, blue: 1.0, alpha: 1),
             .kern: -fontSize * 0.02,
         ]
-        let str = NSAttributedString(string: "drift", attributes: attrs)
+        let str = NSAttributedString(string: "meander", attributes: attrs)
         let ns = NSGraphicsContext(cgContext: ctx, flipped: true)
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = ns

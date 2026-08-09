@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Contributor setup: generates the Xcode project and resolves dependencies.
-# End users do NOT need this; they just download Drift.app from Releases.
+# End users do NOT need this; they just download Meander.app from Releases.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-echo "==> Drift bootstrap"
+echo "==> Meander bootstrap"
 
 # Full Xcode is required (Command Line Tools alone cannot build the app or
 # resolve the WhisperKit package on this setup).
@@ -16,7 +16,7 @@ if ! xcodebuild -version >/dev/null 2>&1; then
   exit 1
 fi
 
-# XcodeGen turns project.yml into Drift.xcodeproj.
+# XcodeGen turns project.yml into Meander.xcodeproj.
 if ! command -v xcodegen >/dev/null 2>&1; then
   if command -v brew >/dev/null 2>&1; then
     echo "==> Installing XcodeGen via Homebrew"
@@ -30,14 +30,14 @@ if ! command -v xcodegen >/dev/null 2>&1; then
   fi
 fi
 
-echo "==> Generating Drift.xcodeproj"
+echo "==> Generating Meander.xcodeproj"
 xcodegen generate
 
 echo "==> Resolving Swift package dependencies (downloads WhisperKit)"
-xcodebuild -resolvePackageDependencies -project Drift.xcodeproj -scheme Drift >/dev/null
+xcodebuild -resolvePackageDependencies -project Meander.xcodeproj -scheme Meander >/dev/null
 
 echo ""
 echo "Done. Next:"
-echo "  open Drift.xcodeproj   then press Run (Cmd+R)"
+echo "  open Meander.xcodeproj   then press Run (Cmd+R)"
 echo "or build from the CLI:"
-echo "  xcodebuild -project Drift.xcodeproj -scheme Drift -configuration Debug build"
+echo "  xcodebuild -project Meander.xcodeproj -scheme Meander -configuration Debug build"

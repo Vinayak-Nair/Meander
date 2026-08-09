@@ -1,4 +1,4 @@
-# Drift cleanup eval
+# Meander cleanup eval
 
 _Generated 2026-07-24 21:22 · 26 contract cases · median of timed runs_
 

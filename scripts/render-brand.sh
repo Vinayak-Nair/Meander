@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Regenerates every Drift brand asset (app icon, menu-bar template, in-app mark,
+# Regenerates every Meander brand asset (app icon, menu-bar template, in-app mark,
 # Branding/ exports) from the designer's artwork PNG. Re-run whenever the mark
-# changes. The source of truth is Branding/drift-mark-source.png (a transparent
+# changes. The source of truth is Branding/meander-mark-source.png (a transparent
 # PNG); each asset trims and composites it so it reproduces the artwork exactly.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 R="scripts/render_assets.swift"
-SRC="Branding/drift-mark-source.png"
-ICONSET="Sources/DriftApp/Assets.xcassets/AppIcon.appiconset"
-MENU="Sources/DriftApp/Assets.xcassets/MenuBarIcon.imageset"
-MARK="Sources/DriftApp/Assets.xcassets/BrandMark.imageset"
+SRC="Branding/meander-mark-source.png"
+ICONSET="Sources/MeanderApp/Assets.xcassets/AppIcon.appiconset"
+MENU="Sources/MeanderApp/Assets.xcassets/MenuBarIcon.imageset"
+MARK="Sources/MeanderApp/Assets.xcassets/BrandMark.imageset"
 mkdir -p "$ICONSET" "$MENU" "$MARK" Branding
-export DRIFT_SRC="$SRC"
+export MEANDER_SRC="$SRC"
 
 echo "==> App icon"
 for s in 16 32 64 128 256 512 1024; do
@@ -28,9 +28,9 @@ swift "$R" imgcrop 600  "$MARK/mark.png"
 swift "$R" imgcrop 1200 "$MARK/mark@2x.png"
 
 echo "==> Branding exports"
-swift "$R" imgcrop  1600     Branding/drift-mark.png
-swift "$R" imgpanel  1600 900 Branding/drift-mark-dark.png
-swift "$R" imglockup 1600 600 Branding/drift-lockup-dark.png
-swift "$R" imgicon   1024     Branding/drift-app-icon.png
+swift "$R" imgcrop  1600     Branding/meander-mark.png
+swift "$R" imgpanel  1600 900 Branding/meander-mark-dark.png
+swift "$R" imglockup 1600 600 Branding/meander-lockup-dark.png
+swift "$R" imgicon   1024     Branding/meander-app-icon.png
 
 echo "==> Done"
