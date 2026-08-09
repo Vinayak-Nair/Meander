@@ -36,12 +36,18 @@ keyUsage = critical,digitalSignature
 extendedKeyUsage = critical,codeSigning
 EOF
 
-# LibreSSL (system openssl) writes a PKCS#12 that `security` can import. Use a
-# non-empty password to avoid an empty-password MAC-verification quirk.
-openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes \
+# LibreSSL (system /usr/bin/openssl) writes a PKCS#12 that `security` can
+# import; a Homebrew/OpenSSL 3.x `openssl` earlier on PATH defaults to a
+# PKCS#12 MAC/cipher the macOS Security framework rejects with "MAC
+# verification failed", so invoke the system binary explicitly rather than
+# relying on PATH order. Use a non-empty password to avoid an
+# empty-password MAC-verification quirk.
+SYSTEM_OPENSSL=/usr/bin/openssl
+
+"$SYSTEM_OPENSSL" req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes \
   -keyout "$TMP/key.pem" -out "$TMP/cert.pem" -config "$TMP/cert.conf" 2>/dev/null
 
-openssl pkcs12 -export -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
+"$SYSTEM_OPENSSL" pkcs12 -export -inkey "$TMP/key.pem" -in "$TMP/cert.pem" \
   -out "$TMP/cert.p12" -passout pass:meander -name "$CERT_NAME" 2>/dev/null
 
 # -A lets codesign use the key without a per-build keychain prompt.
