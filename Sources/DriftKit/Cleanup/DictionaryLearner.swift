@@ -9,9 +9,37 @@ import Foundation
 /// field* are considered — edits the user makes to their own text elsewhere in
 /// the same field are ignored, even when they reuse words the dictation also
 /// contained. A replacement is learned when it plausibly sounds like what it
-/// replaced ("hat" -> "hair", "current johar" -> "Karan Johar"), so content
-/// rewrites ("noon" -> "night") don't pollute the dictionary.
+/// replaced ("current johar" -> "Karan Johar"), so content rewrites
+/// ("noon" -> "night") don't pollute the dictionary.
+///
+/// The other half of not polluting the dictionary is refusing to learn ordinary
+/// English. Every edit inside a pasted region looks like a correction from here,
+/// including the user simply carrying on writing their message, and a dictionary
+/// that accumulates words like "taking", "present" and "connect" does not sit
+/// there harmlessly: `VocabularyCorrector` matches by sound, so each one rewrites
+/// every word that rhymes with it, and dictation gets worse the more it is used.
+/// A word the speaker might genuinely have said is therefore never learned on its
+/// own, however plausible the edit looks; users who really do want one can type it
+/// into the dictionary by hand.
 public enum DictionaryLearner {
+    /// One correction the user demonstrated: the term they typed, and the text
+    /// the transcript actually had there.
+    ///
+    /// `misheardAs` is the half worth keeping. The term alone leaves every later
+    /// correction to re-derive "does this span sound like the term?" from a
+    /// phonetic threshold, and a mishearing that fell outside that threshold once
+    /// will fall outside it every time. Storing the observed wrong form turns the
+    /// same repair into an exact lookup.
+    public struct LearnedTerm: Equatable, Sendable {
+        public let term: String
+        public let misheardAs: String
+
+        public init(term: String, misheardAs: String) {
+            self.term = term
+            self.misheardAs = misheardAs
+        }
+    }
+
     /// Fields larger than this are skipped: diffing huge documents is wasteful
     /// and corrections in them are ambiguous anyway.
     private static let maxTokens = 1200
@@ -23,7 +51,7 @@ public enum DictionaryLearner {
     private static let phoneticTolerance = 0.75
     private static let spellingTolerance = 0.5
 
-    public static func newTerms(pasted: String, before: String, after: String, vocabulary: [String]) -> [String] {
+    public static func newTerms(pasted: String, before: String, after: String, vocabulary: [String]) -> [LearnedTerm] {
         guard before != after, !pasted.isEmpty else { return [] }
         let beforeTokens = tokens(before)
         let afterTokens = tokens(after)
@@ -36,7 +64,7 @@ public enum DictionaryLearner {
         guard !regions.isEmpty else { return [] }
 
         var known = Set(vocabulary.map { $0.lowercased() })
-        var learned: [String] = []
+        var learned: [LearnedTerm] = []
         for hunk in replaceHunks(beforeTokens, afterTokens) {
             // ArraySlice keeps the parent array's indices, so the hunk's span
             // in the field is just its own index range.
@@ -46,7 +74,10 @@ public enum DictionaryLearner {
             guard !known.contains(term.lowercased()) else { continue }
             guard isPlausibleCorrection(of: hunk.old, to: term) else { continue }
             known.insert(term.lowercased())
-            learned.append(term)
+            // The replaced span, normalized the same way the term is, so it can
+            // be compared against future transcripts word for word.
+            let misheard = hunk.old.map(trimEdgePunctuation).filter { !$0.isEmpty }.joined(separator: " ")
+            learned.append(LearnedTerm(term: term, misheardAs: misheard))
         }
         return learned
     }
@@ -54,14 +85,60 @@ public enum DictionaryLearner {
     // MARK: Candidate filtering
 
     /// The corrected span as a dictionary term, or nil when it doesn't look
-    /// like one (too long or too short).
+    /// like one.
     private static func candidateTerm(from span: ArraySlice<String>) -> String? {
-        guard (1...maxTermWords).contains(span.count) else { return nil }
         let cores = span.map(trimEdgePunctuation)
         guard cores.allSatisfy({ !$0.isEmpty }) else { return nil }
         let term = cores.joined(separator: " ")
-        guard VocabularyCorrector.lettersOnly(term).count >= minTermLetters else { return nil }
+        // Judged on the raw tokens, not the trimmed cores: the punctuation is
+        // itself evidence about where the text came from.
+        guard isAcceptableTerm(term, tokens: Array(span)) else { return nil }
         return term
+    }
+
+    /// Whether a string belongs in the dictionary at all.
+    ///
+    /// Shared with `Settings.pruneJunkFromVocabularyOnce`, so the bar for keeping a
+    /// stored term is the same as the bar for learning a new one. Dictionaries
+    /// built before these rules existed hold entries no version of the learner
+    /// would accept today ("us toAre they best.", a file path, "add 1 Sharique
+    /// Shamsudeen"), and one definition is what keeps the cleanup honest instead of
+    /// being a second, drifting opinion.
+    public static func isAcceptableTerm(_ term: String, tokens: [String]? = nil) -> Bool {
+        let tokens = tokens ?? term.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard (1...maxTermWords).contains(tokens.count) else { return false }
+        guard VocabularyCorrector.lettersOnly(term).count >= minTermLetters else { return false }
+        // The dictionary exists for words the models can't be expected to know.
+        // Ordinary English is not that, and adding it does active harm.
+        guard !CommonWords.isOrdinaryPhrase(term) else { return false }
+        // A term is something the user says. Anything ending in sentence
+        // punctuation is a captured sentence, not a name.
+        guard !term.hasSuffix(".") && !term.hasSuffix("?") && !term.hasSuffix("!") else { return false }
+        return tokens.allSatisfy { looksLikeProse($0, inPhrase: tokens.count > 1) }
+    }
+
+    /// Whether a token reads as a spoken word rather than something typed at a
+    /// machine.
+    private static func looksLikeProse(_ token: String, inPhrase: Bool) -> Bool {
+        // Paths, URLs and code fragments reach the learner whenever a dictation
+        // lands in an editor or a terminal. They are not terms, and their
+        // punctuation makes them match strangely once the phonetic layers strip it.
+        let disallowed = CharacterSet(charactersIn: "/\\@#$%^&*<>{}[]()|=+~`")
+        guard token.rangeOfCharacter(from: disallowed) == nil else { return false }
+        // Digits are fine inside a name ("GPT-4"), but a token that is mostly
+        // digits is a number the user typed, not a term.
+        let digits = token.filter(\.isNumber).count
+        guard digits * 2 <= token.count else { return false }
+        // Deliberately no rule against a capital mid-token. It looks like a clean
+        // tell for two words run together by an editing slip ("toAre"), but the
+        // product names this dictionary exists for are spelled the same way
+        // ("ChatGPT", "iPhone"), and those slips are already caught as the
+        // sentences they are.
+        //
+        // Inside a phrase, a fragment of a word ("fil o") gives the phonetic layers
+        // a stub to match on. A one- or two-letter word standing alone is fine.
+        if inPhrase, token.filter(\.isLetter).count < 2 { return false }
+        return true
     }
 
     /// Whether replacing `old` with `term` reads as fixing a mishear rather

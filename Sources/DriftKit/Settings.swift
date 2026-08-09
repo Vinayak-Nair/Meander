@@ -57,12 +57,13 @@ public final class Settings {
         set { languageCode = newValue.code }
     }
 
-    /// The language used for transcription and cleanup. English-only backends
-    /// ignore an old multilingual preference; WhisperKit honors the selection
-    /// (including auto-detect).
+    /// The language used for transcription and cleanup. Backends without a
+    /// language picker report English here, and that answer is not cosmetic: it is
+    /// handed to the transcriber and, for Parakeet, becomes the script the decoder
+    /// is held to. WhisperKit honors the user's selection (including auto-detect).
     public var effectiveLanguage: Language {
         switch transcriptionBackend {
-        case .fluidAudioEnglish, .nemotronEnglish:
+        case .fluidAudioParakeet, .nemotronEnglish:
             return .english
         case .whisperKit:
             return language
@@ -135,15 +136,88 @@ public final class Settings {
 
     /// The user's vocabulary list as typed (one term per line). Kept raw so the
     /// settings editor round-trips exactly; consumers use `customVocabulary`.
+    ///
+    /// Writing prunes learned metadata for terms that are no longer in the list.
+    /// Reconciling only on read would leave orphaned data in storage, so deleting
+    /// a term and later retyping it would silently resurrect mistakes learned in
+    /// its previous life.
     public var customVocabularyRaw: String {
         get { d.string(forKey: "customVocabularyRaw") ?? "" }
-        set { d.set(newValue, forKey: "customVocabularyRaw") }
+        set {
+            d.set(newValue, forKey: "customVocabularyRaw")
+            let surviving = Set(Vocabulary.parse(newValue).map { $0.lowercased() })
+            let metadata = vocabularyMetadata
+            let pruned = metadata.filter { surviving.contains($0.term.lowercased()) }
+            if pruned.count != metadata.count { vocabularyMetadata = pruned }
+        }
     }
 
     /// Parsed personal vocabulary: names and terms the speech models keep
     /// mishearing. Feeds Whisper prompt biasing and the LLM cleanup prompt.
     public var customVocabulary: [String] {
         Vocabulary.parse(customVocabularyRaw)
+    }
+
+    /// Learned metadata for the vocabulary (misheard forms, which engine produced
+    /// them), stored as JSON alongside the plain-text list rather than inside it.
+    ///
+    /// Decoding failures return an empty book rather than throwing: this is
+    /// learned convenience data, and losing it must never break dictation. It
+    /// simply relearns.
+    var vocabularyMetadata: [VocabularyEntry] {
+        get {
+            guard
+                let data = d.data(forKey: "vocabularyMetadata"),
+                let decoded = try? JSONDecoder().decode([VocabularyEntry].self, from: data)
+            else { return [] }
+            return decoded
+        }
+        set {
+            guard let data = try? JSONEncoder().encode(newValue) else { return }
+            d.set(data, forKey: "vocabularyMetadata")
+        }
+    }
+
+    /// The dictionary with its learned mistakes attached, reconciled against the
+    /// user's current term list. This is what the correction layers consume.
+    public var vocabularyBook: VocabularyBook {
+        get { VocabularyBook(terms: customVocabulary, metadata: vocabularyMetadata) }
+        set {
+            customVocabularyRaw = newValue.terms.joined(separator: "\n")
+            vocabularyMetadata = newValue.entries
+        }
+    }
+
+    /// Removes entries the learner would refuse to create today, once, and reports
+    /// what it dropped.
+    ///
+    /// Auto-learning used to accept any plausible-sounding edit, so dictionaries
+    /// built before that was fixed hold ordinary words like "taking" and "present",
+    /// alongside things that were never terms at all: half-typed phrases ("fil o"),
+    /// captured sentences ("us toAre they best."), file paths. The ordinary words
+    /// are the actively harmful ones, since `VocabularyCorrector` matches on sound
+    /// and each one rewrites whatever rhymes with it, but none of them belong in a
+    /// list the user is meant to be able to read and trust.
+    ///
+    /// Tightening the learner stops the list growing; it does nothing about the
+    /// damage already done, which is what this is for. The bar is
+    /// `DictionaryLearner.isAcceptableTerm`, so a stored term is held to exactly the
+    /// standard a new one would be, and names and jargon (`Vercel`, `Uppekha`,
+    /// `Bengaluru`) survive whether they were learned or typed by hand.
+    ///
+    /// It runs once, so anything the user deliberately re-adds afterwards stays.
+    @discardableResult
+    public func pruneJunkFromVocabularyOnce() -> [String] {
+        guard !d.bool(forKey: "didPruneCommonWordVocabulary") else { return [] }
+        d.set(true, forKey: "didPruneCommonWordVocabulary")
+
+        let terms = customVocabulary
+        let removed = terms.filter { !DictionaryLearner.isAcceptableTerm($0) }
+        guard !removed.isEmpty else { return [] }
+        customVocabularyRaw = terms
+            .filter { DictionaryLearner.isAcceptableTerm($0) }
+            .joined(separator: "\n")
+        return removed
     }
 
     // MARK: Per-app formatting

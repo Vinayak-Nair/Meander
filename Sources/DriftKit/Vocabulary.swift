@@ -27,16 +27,27 @@ public enum Vocabulary {
     /// Text passed to Whisper as the conditioning prompt (the model treats it as
     /// preceding transcript, which biases decoding toward these spellings).
     /// Plain comma-separated terms, per OpenAI's spelling-hint guidance.
+    ///
+    /// Correct spellings only, never learned aliases: Whisper biases *toward*
+    /// whatever this prompt contains, so feeding it the misheard form would make
+    /// the model likelier to produce the mistake. Aliases are for the layers that
+    /// repair text after decoding, not for the one that conditions it.
     public static func whisperPrompt(terms: [String]) -> String? {
         guard !terms.isEmpty else { return nil }
         return terms.prefix(maxWhisperTerms).joined(separator: ", ")
     }
 
+    /// Cap on terms named in the cleanup prompt. Unlike the Whisper cap this is
+    /// not a hard model limit: it keeps a large dictionary from crowding out the
+    /// cleanup instructions themselves, which matters most for the 0.5B on-device
+    /// model, and keeps per-dictation prefill cost bounded for every provider.
+    public static let maxCleanupTerms = 60
+
     /// Instruction appended to the LLM cleanup system prompt so mangled names
     /// ("I should have a run") are restored from the user's list.
-    public static func cleanupClause(terms: [String]) -> String? {
+    public static func cleanupClause(terms: [String], limit: Int = maxCleanupTerms) -> String? {
         guard !terms.isEmpty else { return nil }
-        let list = terms.joined(separator: ", ")
+        let list = terms.prefix(limit).joined(separator: ", ")
         return """
         The speaker often says these names and terms: \(list). \
         If a word or phrase in the transcript looks like a misrecognition of one \
@@ -44,4 +55,29 @@ public enum Vocabulary {
         term. Only substitute when the match is plausible from context.
         """
     }
+
+    /// The cleanup clause with learned mistakes spelled out, which is strictly
+    /// more useful to the model than the term list alone: "written as X when the
+    /// speaker said Y" is a concrete rule, where a bare list leaves the model to
+    /// judge phonetic similarity itself. Terms with no learned mistakes still
+    /// appear, just without the "heard as" hint.
+    public static func cleanupClause(book: VocabularyBook, limit: Int = maxCleanupTerms) -> String? {
+        guard !book.isEmpty else { return nil }
+        let described = book.entries.prefix(limit).map { entry -> String in
+            guard !entry.aliases.isEmpty else { return entry.term }
+            // Cap the aliases per term too: a long-lived entry can accumulate
+            // many, and one term must not crowd out the rest of the list.
+            let heard = entry.aliases.suffix(maxAliasesPerTerm).joined(separator: "\", \"")
+            return "\(entry.term) (sometimes transcribed as \"\(heard)\")"
+        }
+        return """
+        The speaker often says these names and terms: \(described.joined(separator: "; ")). \
+        If a word or phrase in the transcript looks like a misrecognition of one \
+        of them (similar sound, garbled spelling), replace it with the correct \
+        term. Only substitute when the match is plausible from context.
+        """
+    }
+
+    /// Cap on learned mistakes quoted per term in the cleanup prompt.
+    public static let maxAliasesPerTerm = 3
 }

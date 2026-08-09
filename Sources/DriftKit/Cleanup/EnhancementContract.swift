@@ -39,4 +39,17 @@ public enum EnhancementContract {
     Preserve the speaker's tone and vocabulary. Output ONLY the cleaned text and \
     nothing else.
     """
+
+    /// The contract plus the user's dictionary, for the on-device LLM provider.
+    ///
+    /// The dictionary goes *after* the contract deliberately: it is the one part
+    /// of the prompt that changes between users, and trailing it keeps the fixed
+    /// prefix stable. Returns the bare contract when the dictionary is empty, so
+    /// users without one pay no extra prefill on every dictation.
+    public static func systemPrompt(vocabulary: VocabularyBook) -> String {
+        guard let clause = Vocabulary.cleanupClause(book: vocabulary) else {
+            return systemPrompt
+        }
+        return systemPrompt + "\n\n" + clause
+    }
 }

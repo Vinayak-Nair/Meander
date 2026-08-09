@@ -70,7 +70,7 @@ public enum CleanupFactory {
                 model: settings.openAIModel,
                 apiKey: settings.openAIKey,
                 tone: profile.tone,
-                vocabulary: settings.customVocabulary,
+                vocabulary: settings.vocabularyBook,
                 destination: destination
             )
         case "ollama":
@@ -78,7 +78,7 @@ public enum CleanupFactory {
                 baseURL: settings.ollamaBaseURL,
                 model: settings.ollamaModel,
                 tone: profile.tone,
-                vocabulary: settings.customVocabulary,
+                vocabulary: settings.vocabularyBook,
                 destination: destination
             )
         default:
@@ -93,7 +93,7 @@ enum CleanupPrompt {
     static func system(
         for language: Language,
         tone: String? = nil,
-        vocabulary: [String] = [],
+        vocabulary: VocabularyBook = .init(),
         destination: String? = nil
     ) -> String {
         let langClause: String
@@ -115,7 +115,7 @@ enum CleanupPrompt {
         if let tone, !tone.isEmpty {
             prompt += " \(tone)"
         }
-        if let clause = Vocabulary.cleanupClause(terms: vocabulary) {
+        if let clause = Vocabulary.cleanupClause(book: vocabulary) {
             prompt += " \(clause)"
         }
         return prompt

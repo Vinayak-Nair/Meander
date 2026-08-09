@@ -10,25 +10,52 @@ import Foundation
 /// phonetically and in raw spelling before it is replaced. Severely mangled
 /// captures ("I should have a run" for "Aishwarya Rai") are left alone here;
 /// the LLM cleanup layer, which sees the vocabulary in its prompt, handles those.
+///
+/// The hard rule is that ordinary English is never touched on phonetic evidence
+/// (see `CommonWords`). Sound-alike matching cannot tell a mangled name from a
+/// word the speaker actually said, so a dictionary holding "Connect", "taking" or
+/// "present" would otherwise rewrite every "connected", "talking" and "president"
+/// in the transcript. A term the user really did have misheard as a common word
+/// is still repaired, but only through a learned alias, where the user has
+/// demonstrated that exact replacement rather than the matcher guessing at it.
 public enum VocabularyCorrector {
     /// Max normalized edit distance between phonetic keys for a match.
     private static let phoneticThreshold = 0.34
     /// Max normalized edit distance between letters-only spellings for a match.
+    ///
+    /// Deliberately loose, because tightening it cannot do the job people expect
+    /// of it. The real mishearings sit *further* from their term than the false
+    /// positives do: "current johar" is 0.42 away from "Karan Johar", while
+    /// "market" is only 0.38 from "Parakeet 3". No threshold separates those, so
+    /// this stays permissive enough for the genuine captures and the ordinary-word
+    /// check below is what keeps real words from being rewritten.
     private static let spellingThreshold = 0.5
     /// Keys shorter than this fall back to a strict spelling-only comparison,
     /// since tiny phonetic keys collide too easily.
     private static let minKeyLength = 3
     /// Spelling threshold for the short-key fallback path.
     private static let strictSpellingThreshold = 0.25
+    /// Terms shorter than this are matched only exactly or through a learned
+    /// alias, never phonetically. Short terms have short keys, and a short key
+    /// puts most of the language within one or two edits of the term.
+    private static let minFuzzyTermLetters = 5
 
     public static func correct(_ text: String, vocabulary: [String]) -> String {
-        guard !text.isEmpty, !vocabulary.isEmpty else { return text }
+        correct(text, book: VocabularyBook(terms: vocabulary, metadata: []))
+    }
+
+    /// Corrects against the dictionary *and* the mistakes learned for it. A span
+    /// that exactly matches a known misheard form is replaced outright: the user
+    /// has already demonstrated that exact repair, so it needs no phonetic
+    /// confidence check and is applied before any fuzzy match can claim the span.
+    public static func correct(_ text: String, book: VocabularyBook) -> String {
+        guard !text.isEmpty, !book.isEmpty else { return text }
 
         let segments = split(text)
         let words = segments.compactMap { $0.word }
         guard !words.isEmpty else { return text }
 
-        let matches = bestMatches(words: words, vocabulary: vocabulary)
+        let matches = bestMatches(words: words, book: book)
         guard !matches.isEmpty else { return text }
 
         return rebuild(segments: segments, words: words, matches: matches)
@@ -44,16 +71,22 @@ public enum VocabularyCorrector {
         let replacement: String
     }
 
-    private static func bestMatches(words: [Word], vocabulary: [String]) -> [Match] {
-        var candidates: [Match] = []
-        // Spans already spelled exactly right are locked first, so a fuzzy
-        // window like "Karan Johar is" can't swallow a correct "Karan Johar".
+    private static func bestMatches(words: [Word], book: VocabularyBook) -> [Match] {
+        let vocabulary = book.terms
+        // Learned mistakes first, at a score no fuzzy candidate can reach, so an
+        // exact known mishearing always wins its span.
+        var candidates = aliasMatches(words: words, aliases: book.aliasIndex)
+        // Spans already spelled exactly right are locked, so a fuzzy window like
+        // "Karan Johar is" can't swallow a correct "Karan Johar".
         var used = exactSpans(words: words, vocabulary: vocabulary)
 
         for term in vocabulary {
             let termWordCount = max(1, term.split(separator: " ").count)
             let termLetters = lettersOnly(term)
             guard !termLetters.isEmpty else { continue }
+            // Below this length the phonetic key is too small to carry evidence;
+            // such a term still gets its exact and alias matches above.
+            guard termLetters.count >= minFuzzyTermLetters else { continue }
             let termKey = phoneticKey(termLetters)
 
             let minWindow = max(1, termWordCount - 1)
@@ -64,12 +97,33 @@ public enum VocabularyCorrector {
                     let window = Array(words[start..<(start + windowLength)])
                     let visible = window.map(\.core).joined(separator: " ")
                     guard visible != term else { continue } // already correct
+                    // A term the user typed in lower case must not strip capitals
+                    // the transcript already has: a dictionary holding "kollam"
+                    // should leave a sentence-opening "Kollam" alone rather than
+                    // "fixing" it down. Adding capitals is still allowed, which is
+                    // what makes "karan johar" -> "Karan Johar" work.
+                    guard !stripsCapitalization(from: visible, to: term) else { continue }
+                    // The speaker said real words here. Whatever this sounds
+                    // like, it is not a mangled name, and rewriting it would
+                    // corrupt a sentence the model got right.
+                    guard !CommonWords.isOrdinaryPhrase(visible) else { continue }
                     let windowLetters = lettersOnly(visible)
                     guard !windowLetters.isEmpty else { continue }
 
                     guard let score = matchScore(
                         termLetters: termLetters, termKey: termKey,
                         windowLetters: windowLetters
+                    ) else { continue }
+                    // A window wider than the term is there for resegmentation
+                    // ("Aishwarya" heard as "ash warya"), where every fragment is
+                    // needed to reach the term. If a narrower window matches at
+                    // least as well, the edge word is not part of the mishearing
+                    // and including it is how a term reaches past the
+                    // ordinary-word check: "Connect" cannot claim "connected", so
+                    // it claims "connected app" and deletes a word instead.
+                    guard !edgeWordIsSurplus(
+                        window: window, score: score,
+                        termLetters: termLetters, termKey: termKey
                     ) else { continue }
 
                     candidates.append(Match(
@@ -97,7 +151,70 @@ public enum VocabularyCorrector {
         return accepted
     }
 
-    /// Word spans that already read exactly as a vocabulary term.
+    /// Whether dropping a word from either end of the window matches the term at
+    /// least as well as the whole window does. When it does, the edge word carries
+    /// no evidence and the narrower span is the honest candidate; it is generated
+    /// by the same loop and judged on its own merits.
+    private static func edgeWordIsSurplus(
+        window: [Word], score: Double, termLetters: [Character], termKey: [Character]
+    ) -> Bool {
+        guard window.count > 1 else { return false }
+        for narrowed in [Array(window.dropFirst()), Array(window.dropLast())] {
+            let letters = lettersOnly(narrowed.map(\.core).joined(separator: " "))
+            guard !letters.isEmpty else { continue }
+            guard let tighter = matchScore(
+                termLetters: termLetters, termKey: termKey, windowLetters: letters
+            ) else { continue }
+            if tighter <= score { return true }
+        }
+        return false
+    }
+
+    /// Whether replacing `visible` with `term` would only remove capitals. Applies
+    /// to spans that are already the term bar casing; a genuinely different span is
+    /// judged on sound instead.
+    private static func stripsCapitalization(from visible: String, to term: String) -> Bool {
+        guard visible.lowercased() == term.lowercased() else { return false }
+        return visible.contains(where: \.isUppercase) && !term.contains(where: \.isUppercase)
+    }
+
+    /// Spans that exactly match a learned misheard form, scored below every
+    /// fuzzy candidate (negative, so the shared sort puts them first).
+    ///
+    /// Matching is case-insensitive on the word cores and ignores surrounding
+    /// punctuation, the same normalization `note(misheardAs:)` applies when the
+    /// alias is stored, so "Current Johar," matches the alias "current johar".
+    private static func aliasMatches(words: [Word], aliases: [String: String]) -> [Match] {
+        guard !aliases.isEmpty else { return [] }
+        var matches: [Match] = []
+        for (alias, term) in aliases {
+            let length = max(1, alias.split(separator: " ").count)
+            guard length <= words.count else { continue }
+            for start in 0...(words.count - length) {
+                let visible = words[start..<(start + length)]
+                    .map { $0.core.lowercased() }
+                    .joined(separator: " ")
+                guard visible == alias else { continue }
+                matches.append(Match(
+                    start: start, end: start + length - 1,
+                    // Longer aliases outrank shorter ones on the shared sort,
+                    // which breaks score ties by span length anyway; the offset
+                    // just keeps every alias below the fuzzy floor of 0.
+                    score: -1, replacement: term
+                ))
+            }
+        }
+        return matches
+    }
+
+    /// Word spans that already read as a vocabulary term and must be left as they
+    /// are: either spelled exactly right, or right bar capitals the term itself
+    /// doesn't carry.
+    ///
+    /// Locking the second kind matters as much as the first. Declining to rewrite
+    /// "Kollam" as "kollam" only helps if the span is then off limits to everything
+    /// else; otherwise a neighbouring window ("Kollam is") is free to claim it and
+    /// swallow the following word.
     private static func exactSpans(words: [Word], vocabulary: [String]) -> Set<Int> {
         var spans = Set<Int>()
         for term in vocabulary {
@@ -105,7 +222,7 @@ public enum VocabularyCorrector {
             guard count <= words.count else { continue }
             for start in 0...(words.count - count) {
                 let visible = words[start..<(start + count)].map(\.core).joined(separator: " ")
-                if visible == term {
+                if visible == term || stripsCapitalization(from: visible, to: term) {
                     (start..<(start + count)).forEach { spans.insert($0) }
                 }
             }

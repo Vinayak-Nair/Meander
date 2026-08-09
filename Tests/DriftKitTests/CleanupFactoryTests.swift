@@ -55,13 +55,13 @@ final class CleanupFactoryTests: XCTestCase {
     }
 
     func testDefaultsToFluidAudioEnglishBackend() {
-        XCTAssertEqual(makeSettings().transcriptionBackend, .fluidAudioEnglish)
+        XCTAssertEqual(makeSettings().transcriptionBackend, .fluidAudioParakeet)
     }
 
     func testFluidAudioBackendForcesEffectiveLanguageToEnglish() {
         let s = makeSettings()
         s.language = .malayalam
-        s.transcriptionBackend = .fluidAudioEnglish
+        s.transcriptionBackend = .fluidAudioParakeet
         XCTAssertEqual(s.effectiveLanguage, .english)
     }
 

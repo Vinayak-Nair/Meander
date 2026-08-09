@@ -15,10 +15,15 @@ public final class WhisperKitTranscriber: Transcriber {
     }
 
     public func transcribe(samples: [Float], language: Language) async throws -> String {
-        // `language: nil` lets Whisper auto-detect (used for Language.auto).
+        // `language: nil` lets Whisper auto-detect (used for Language.auto), but
+        // only when `detectLanguage` is also set: WhisperKit defaults it to
+        // `!usePrefillPrompt`, and `usePrefillPrompt` defaults to true, so leaving
+        // it alone silently prefills `<|en|>` and decodes every language as
+        // English. Auto-detect has to opt in explicitly.
         var options = DecodingOptions(
             task: .transcribe,
-            language: language.whisperCode
+            language: language.whisperCode,
+            detectLanguage: language.isAuto
         )
         options.promptTokens = biasPromptTokens()
         let results = try await whisperKit.transcribe(audioArray: samples, decodeOptions: options)

@@ -11,11 +11,11 @@ public struct OllamaCleanup: CleanupProvider {
     let baseURL: String
     let model: String
     let tone: String?
-    let vocabulary: [String]
+    let vocabulary: VocabularyBook
     let destination: String?
 
     public init(baseURL: String, model: String, tone: String? = nil,
-                vocabulary: [String] = [], destination: String? = nil) {
+                vocabulary: VocabularyBook = .init(), destination: String? = nil) {
         self.baseURL = baseURL
         self.model = model
         self.tone = tone

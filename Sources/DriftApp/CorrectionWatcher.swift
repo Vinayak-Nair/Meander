@@ -26,6 +26,9 @@ final class CorrectionWatcher {
     /// learned-word toast appear a beat after the user finishes a correction.
     private static let pollInterval = 1.0
     private static let watchWindow = 75.0
+    /// Consecutive unchanged reads required before an edit is treated as
+    /// finished. See the read loop for why one is not enough.
+    private static let stableTicksBeforeLearning = 2
 
     private var task: Task<Void, Never>?
 
@@ -34,7 +37,7 @@ final class CorrectionWatcher {
     func watch(
         pasted: String,
         vocabulary: @escaping () -> [String],
-        onLearn: @escaping ([String]) -> Void
+        onLearn: @escaping ([DictionaryLearner.LearnedTerm]) -> Void
     ) {
         cancel()
         task = Task {
@@ -96,6 +99,7 @@ final class CorrectionWatcher {
             // `processed` and because `vocabulary()` re-reads settings.
             var previous = baseline
             var processed = baseline
+            var stableTicks = 0
             while elapsed < Self.watchWindow {
                 try? await Task.sleep(for: .seconds(Self.pollInterval))
                 elapsed += Self.pollInterval
@@ -108,9 +112,15 @@ final class CorrectionWatcher {
                     Self.trace("poll \(Int(elapsed))s: field cleared or replaced (message sent?), stopping")
                     return
                 }
+                stableTicks = current == previous ? stableTicks + 1 : 0
                 defer { previous = current }
                 guard current != processed else { continue } // nothing new
-                guard current == previous else { continue }  // still typing; wait for a stable read
+                // A single quiet tick is not enough: people pause mid-sentence, so
+                // one second of stillness catches them part-way through typing and
+                // hands the learner a half-written phrase ("fil o" on the way to
+                // "file or"). Waiting for a second quiet tick costs a beat on the
+                // toast and keeps typing-in-progress out of the dictionary.
+                guard stableTicks >= Self.stableTicksBeforeLearning else { continue }
 
                 let terms = DictionaryLearner.newTerms(
                     pasted: pasted, before: baseline, after: current,

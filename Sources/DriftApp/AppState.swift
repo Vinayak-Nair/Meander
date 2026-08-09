@@ -138,7 +138,19 @@ final class AppState: ObservableObject {
         refreshSelectedMicrophone()
         // Register the MLX on-device LLM cleanup provider (no-op if its model
         // isn't downloaded) and warm it so the first dictation isn't cold.
-        MLXBridge.register(modelsRoot: modelManager.modelsDirectory)
+        MLXBridge.register(modelsRoot: modelManager.modelsDirectory, settings: settings)
+        // Repairs dictionaries poisoned by the old auto-learning rules before any
+        // dictation can be run through them. Terms learned back then include
+        // ordinary words like "taking" and "present", and the corrector matches on
+        // sound, so leaving them in place would keep rewriting correct transcripts.
+        let pruned = settings.pruneJunkFromVocabularyOnce()
+        if !pruned.isEmpty {
+            customVocabularyRaw = settings.customVocabularyRaw
+            LatencyLog.record("pruned \(pruned.count) common word(s) from dictionary: \(pruned.joined(separator: ", "))")
+        }
+        // Covers dictionaries that already existed (including terms typed by hand
+        // in Settings, which don't go through `learnVocabulary`).
+        installVocabularyBoostIfNeeded()
         let ready = settings.hasCompletedOnboarding && micGranted
             && accessibilityGranted && inputMonitoringGranted && modelManager.isDefaultModelDownloaded
         if !inputMonitoringGranted {
@@ -306,30 +318,44 @@ final class AppState: ObservableObject {
     /// them in a floating toast (with Remove to undo). A term that already
     /// exists with different casing is updated in place ("vinayak" becomes
     /// "Vinayak") rather than duplicated.
-    func learnVocabulary(_ terms: [String]) {
-        var entries = Vocabulary.parse(settings.customVocabularyRaw)
-        var applied: [String] = []
-        for term in terms {
-            if let index = entries.firstIndex(where: { $0.lowercased() == term.lowercased() }) {
-                if entries[index] != term {
-                    entries[index] = term
-                    applied.append(term)
-                }
-            } else {
-                entries.append(term)
-                applied.append(term)
-            }
+    ///
+    /// Each correction also records what the transcript actually said and which
+    /// engine produced it. The engine tag is recorded against the term, not used
+    /// to scope it: the mishearing describes how the term sounds, so it is worth
+    /// applying whichever backend is active later.
+    func learnVocabulary(_ terms: [DictionaryLearner.LearnedTerm]) {
+        var book = settings.vocabularyBook
+        let before = book.entries
+        let source = settings.transcriptionBackend.rawValue
+        for learned in terms {
+            book.note(term: learned.term, misheardAs: learned.misheardAs, source: source)
         }
-        guard !applied.isEmpty else { return }
-        customVocabularyRaw = entries.joined(separator: "\n")
-        showLearnedToast(applied)
+        guard book.entries != before else { return }
+        settings.vocabularyBook = book
+        // Keep the published copy in step: the settings editor binds to the raw
+        // text, and `settings` was written behind its back.
+        customVocabularyRaw = settings.customVocabularyRaw
+        showLearnedToast(terms.map(\.term))
+        installVocabularyBoostIfNeeded()
+    }
+
+    /// Fetches the auxiliary model that lets Parakeet check the dictionary
+    /// against the audio, in the background, the first time the user has terms
+    /// worth checking. Failure is silent: the dictionary still works through the
+    /// text-level layers, and the next attempt retries.
+    func installVocabularyBoostIfNeeded() {
+        let manager = modelManager
+        Task.detached(priority: .utility) {
+            await manager.installParakeetVocabularyBoostIfNeeded()
+        }
     }
 
     /// Removes a dictionary entry (case-insensitive). Used by the toast's Remove.
     func removeVocabularyTerm(_ term: String) {
-        let entries = Vocabulary.parse(settings.customVocabularyRaw)
-            .filter { $0.lowercased() != term.lowercased() }
-        customVocabularyRaw = entries.joined(separator: "\n")
+        var book = settings.vocabularyBook
+        book.remove(term: term)
+        settings.vocabularyBook = book
+        customVocabularyRaw = settings.customVocabularyRaw
     }
 
     // MARK: Learned-term toast
@@ -452,9 +478,9 @@ final class AppState: ObservableObject {
     var dictationModelOptions: [DictationModelOption] {
         var options: [DictationModelOption] = [
             DictationModelOption(
-                id: TranscriptionBackend.fluidAudioEnglish.id,
+                id: TranscriptionBackend.fluidAudioParakeet.id,
                 displayName: "Parakeet v3, English (fastest)",
-                backendID: TranscriptionBackend.fluidAudioEnglish.id,
+                backendID: TranscriptionBackend.fluidAudioParakeet.id,
                 variant: nil
             ),
             DictationModelOption(
@@ -477,7 +503,7 @@ final class AppState: ObservableObject {
 
     var selectedDictationModelID: String {
         switch transcriptionBackend {
-        case .fluidAudioEnglish: return TranscriptionBackend.fluidAudioEnglish.id
+        case .fluidAudioParakeet: return TranscriptionBackend.fluidAudioParakeet.id
         case .nemotronEnglish: return TranscriptionBackend.nemotronEnglish.id
         case .whisperKit: return "whisperKit:\(modelVariant)"
         }
@@ -682,7 +708,7 @@ final class AppState: ObservableObject {
 
     var availableLanguages: [Language] {
         switch transcriptionBackend {
-        case .fluidAudioEnglish, .nemotronEnglish:
+        case .fluidAudioParakeet, .nemotronEnglish:
             return [.english]
         case .whisperKit:
             return Language.whisperKitLanguages
@@ -698,7 +724,7 @@ final class AppState: ObservableObject {
 
     var modelSetupTitle: String {
         switch transcriptionBackend {
-        case .fluidAudioEnglish, .nemotronEnglish:
+        case .fluidAudioParakeet, .nemotronEnglish:
             return "Download the English speech model"
         case .whisperKit:
             return "Download the speech model"
@@ -707,7 +733,7 @@ final class AppState: ObservableObject {
 
     var modelSetupDetail: String {
         switch transcriptionBackend {
-        case .fluidAudioEnglish:
+        case .fluidAudioParakeet:
             return "A one-time FluidAudio Parakeet v3 download for fast, local dictation."
         case .nemotronEnglish:
             return "A one-time Nemotron 0.6B streaming model download (English). Prototype for evaluating streaming latency."
@@ -727,7 +753,7 @@ final class AppState: ObservableObject {
         let current = Language.from(code: languageCode)
         let fallback: Language
         switch transcriptionBackend {
-        case .fluidAudioEnglish, .nemotronEnglish:
+        case .fluidAudioParakeet, .nemotronEnglish:
             fallback = .english
         case .whisperKit:
             fallback = .auto

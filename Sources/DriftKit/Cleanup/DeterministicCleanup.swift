@@ -31,8 +31,14 @@ public struct DeterministicCleanup: CleanupProvider {
             return t.trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
-        t = removeDoubledWords(from: t)
+        // Fillers first: a filler sitting between two copies of a word hides the
+        // repetition from the collapse below, and the transcriber emits exactly
+        // that ("Vinayak um Vinayak" survived as "Vinayak Vinayak").
         t = removeFillers(from: t)
+        t = removeDoubledWords(from: t)
+        // Before capitalization, so a rewritten hour doesn't leave a stray capital
+        // mid-token ("Tree pm" -> "3Pm").
+        t = SpokenTime.format(t)
         t = collapseWhitespace(t)
         t = removeSpaceBeforePunctuation(t)
         t = addSpaceAfterSentencePunctuation(t)
@@ -40,6 +46,10 @@ public struct DeterministicCleanup: CleanupProvider {
             t = capitalizeStandaloneI(t)
         }
         t = capitalizeSentences(t)
+        // Last, because the dot it produces is not sentence punctuation: run any
+        // earlier and `addSpaceAfterSentencePunctuation` splits the host and
+        // `capitalizeSentences` capitalizes the fragment ("vinayak. Com").
+        t = SpokenAddress.format(t)
         return t.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -107,6 +117,12 @@ public struct DeterministicCleanup: CleanupProvider {
                 capitalizeNext = false
             } else {
                 result.append(ch)
+                // A sentence opening with a number has nothing to capitalize, and
+                // hunting on for the first letter puts the capital inside a word
+                // instead: "3pm works" became "3Pm works", "3 apples" became
+                // "3 Apples". Leading quotes and brackets deliberately still carry
+                // through, so "hello" he said still capitalizes the quoted word.
+                if capitalizeNext, ch.isNumber { capitalizeNext = false }
             }
             if ch == "." || ch == "!" || ch == "?" || ch == "\n" {
                 capitalizeNext = true

@@ -9,7 +9,11 @@ import DriftMLX
 enum MLXBridge {
     /// Registers the "mlx" provider if its model is present on disk. If the model
     /// hasn't been downloaded, "mlx" simply falls back to deterministic cleanup.
-    static func register(modelsRoot: URL) {
+    ///
+    /// `settings` is captured for the dictionary rather than read from the
+    /// factory's per-call argument: the provider is a single warm instance, so it
+    /// has to read the vocabulary itself at cleanup time.
+    static func register(modelsRoot: URL, settings: Settings) {
         let dir = modelsRoot.appendingPathComponent("mlx/qwen2.5-0.5b-4bit", isDirectory: true)
         seedBundledModelIfNeeded(at: dir)
         guard FileManager.default.fileExists(atPath: dir.appendingPathComponent("config.json").path) else {
@@ -18,7 +22,8 @@ enum MLXBridge {
         let provider = MLXCleanup(
             id: "mlx",
             displayName: "On-device LLM (MLX)",
-            modelDirectory: dir
+            modelDirectory: dir,
+            vocabularyProvider: { settings.vocabularyBook }
         )
         CleanupFactory.externalBuilders["mlx"] = { _, _, _ in provider }
         // Warm the model in the background so the first dictation isn't cold.

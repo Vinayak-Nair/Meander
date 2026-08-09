@@ -37,6 +37,10 @@ cp -R "$ARCHIVE/Products/Applications/Drift.app" "$BUILD/export/"
 # Bundle the default English model (Parakeet v3) so first-run dictation needs no
 # download. Source defaults to the local model cache; run the app once to populate
 # it, or point MODEL_CACHE at a directory containing the parakeet-tdt-0.6b-v3 folder.
+#
+# v3 must match ModelManager.parakeetVersion. Only v3 exposes the joint top-K
+# outputs the decoder's script filter needs, so bundling v2 would be ignored at
+# load time and would drop the language guarantee.
 MODEL_CACHE="${MODEL_CACHE:-$HOME/Library/Application Support/Drift/models/FluidAudio}"
 MODEL_DIR="$MODEL_CACHE/parakeet-tdt-0.6b-v3"
 if [ -d "$MODEL_DIR" ]; then

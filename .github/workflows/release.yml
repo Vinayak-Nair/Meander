@@ -40,6 +40,9 @@ jobs:
     runs-on: macos-26
     timeout-minutes: 60
     env:
+      # v3 must match ModelManager.parakeetVersion. The per-token script filter
+      # that keeps output in the selected language needs the v3 joint model's
+      # top-K outputs; shipping v2 here would silently drop that guarantee.
       MODEL_REPO: FluidInference/parakeet-tdt-0.6b-v3-coreml
       MODEL_DIR_NAME: parakeet-tdt-0.6b-v3
       MLX_MODEL_REPO: mlx-community/Qwen2.5-0.5B-Instruct-4bit

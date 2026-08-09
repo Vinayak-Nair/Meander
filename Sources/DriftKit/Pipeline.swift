@@ -142,8 +142,10 @@ public final class Pipeline {
         if profile.style == .code { return prepared }
 
         // Phonetic dictionary pass runs before cleanup so every provider (including
-        // fully on-device) sees "Karan Johar" instead of "current johar".
-        prepared = VocabularyCorrector.correct(prepared, vocabulary: settings.customVocabulary)
+        // fully on-device) sees "Karan Johar" instead of "current johar". Learned
+        // mistakes ride along, so a mishearing the user has already fixed once is
+        // repaired exactly rather than re-guessed phonetically.
+        prepared = VocabularyCorrector.correct(prepared, book: settings.vocabularyBook)
 
         let cleaner = CleanupFactory.make(
             settings: settings,

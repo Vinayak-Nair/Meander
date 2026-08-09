@@ -20,18 +20,28 @@ public final class MLXCleanup: CleanupProvider {
     public let requiresNetwork = false
 
     private let warm: WarmMLXModel
+    /// Read at cleanup time (not captured once) so dictionary edits apply to the
+    /// next dictation, matching `WhisperKitTranscriber`'s decode-time biasing.
+    private let vocabularyProvider: @Sendable () -> VocabularyBook
 
-    public init(id: String, displayName: String, modelDirectory: URL) {
+    public init(
+        id: String,
+        displayName: String,
+        modelDirectory: URL,
+        vocabularyProvider: @escaping @Sendable () -> VocabularyBook = { .init() }
+    ) {
         self.id = id
         self.displayName = displayName
         self.warm = WarmMLXModel(modelDirectory: modelDirectory)
+        self.vocabularyProvider = vocabularyProvider
     }
 
     /// Loads the model ahead of first use so the first dictation is already warm.
     public func prewarm() async throws { try await warm.prewarm() }
 
     public func clean(_ text: String, language _: Language) async throws -> String {
-        let cleaned = try await warm.clean(text)
+        let instructions = EnhancementContract.systemPrompt(vocabulary: vocabularyProvider())
+        let cleaned = try await warm.clean(text, instructions: instructions)
         return cleaned.isEmpty ? text : cleaned
     }
 }
@@ -80,12 +90,16 @@ actor WarmMLXModel {
         GenerateParameters(maxTokens: maxTokens, temperature: 0.2)
     }
 
-    func clean(_ text: String) async throws -> String {
+    /// `instructions` is the system prompt for this call: the enhancement
+    /// contract, plus the user's dictionary clause when they have one. Passed in
+    /// per call rather than stored so a dictionary edit takes effect immediately
+    /// without reloading the container.
+    func clean(_ text: String, instructions: String) async throws -> String {
         let container = try await loadedContainer()
         // Fresh session per call: warm model, but no accumulated history.
         let session = ChatSession(
             container,
-            instructions: EnhancementContract.systemPrompt,
+            instructions: instructions,
             generateParameters: Self.parameters()
         )
         let response = try await session.respond(to: text)

@@ -12,11 +12,11 @@ public struct OpenAICompatibleCleanup: CleanupProvider {
     let model: String
     let apiKey: String
     let tone: String?
-    let vocabulary: [String]
+    let vocabulary: VocabularyBook
     let destination: String?
 
     public init(baseURL: String, model: String, apiKey: String, tone: String? = nil,
-                vocabulary: [String] = [], destination: String? = nil) {
+                vocabulary: VocabularyBook = .init(), destination: String? = nil) {
         self.baseURL = baseURL
         self.model = model
         self.apiKey = apiKey
