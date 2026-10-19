@@ -62,6 +62,8 @@ By default, audio is transcribed on-device and cleaned on-device. Nothing is upl
 
 ## Building from source (for contributors)
 
+Want to help? Read [CONTRIBUTING.md](CONTRIBUTING.md) first.
+
 ### Requirements
 
 - macOS 14+

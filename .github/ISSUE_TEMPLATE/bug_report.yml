@@ -1,0 +1,65 @@
+name: Bug report
+description: Something isn't working as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Notes
+        2. Hold Right Option and say "..."
+        3. Release
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Meander version
+      description: Menu bar icon ▸ About, or the release you downloaded. Say "built from source" plus the commit if applicable.
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version and Mac model
+      placeholder: macOS 15.2, MacBook Air M2
+    validations:
+      required: true
+  - type: dropdown
+    id: model
+    attributes:
+      label: Dictation model
+      options:
+        - FluidAudio English (Parakeet, default)
+        - WhisperKit Multilingual
+        - Not sure
+    validations:
+      required: true
+  - type: dropdown
+    id: cleanup
+    attributes:
+      label: Cleanup provider
+      options:
+        - On-device rules (default)
+        - On-device LLM (MLX)
+        - Cloud (OpenAI-compatible)
+        - Local LLM (Ollama)
+        - Raw transcription
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Optional. Console.app output filtered by "Meander" is very helpful for crashes and permission problems.
+    validations:
+      required: false
