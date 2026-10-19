@@ -90,6 +90,22 @@ public struct VocabularyBook: Sendable, Equatable {
         return index
     }
 
+    /// Copy containing only aliases whose spelling remains close enough to the
+    /// canonical term to reuse safely. The original learned history is retained
+    /// in settings; callers choose the filtered view for precision-first paths.
+    func retainingAliases(minimumSpellingSimilarity: Double) -> VocabularyBook {
+        VocabularyBook(entries: entries.map { entry in
+            VocabularyEntry(
+                term: entry.term,
+                aliases: entry.aliases.filter {
+                    VocabularyCorrector.spellingSimilarity($0, entry.term)
+                        >= minimumSpellingSimilarity
+                },
+                sources: entry.sources
+            )
+        })
+    }
+
     /// Records a mistake against `term`, adding the term if it is new.
     public mutating func note(term: String, misheardAs heard: String?, source: String?) {
         let key = term.lowercased()

@@ -157,6 +157,31 @@ final class VocabularyCorrectorTests: XCTestCase {
         XCTAssertEqual(VocabularyCorrector.correct(text, book: b), text)
     }
 
+    /// A learned alias must not make nearby ordinary speech expand into the
+    /// dictionary term. This mirrors the user's real dictionary, where
+    /// "what is dlc" was learned for "Ask ChatGPT" but "what I'm trying"
+    /// is unrelated prose and must remain untouched.
+    func testLearnedAliasDoesNotRewriteNearbyOrdinarySpeech() {
+        let b = book("Ask ChatGPT", aliases: ["what is dlc"])
+        let text = "No no, what I'm trying to say is that change from Parakeet to Whisper."
+        XCTAssertEqual(VocabularyCorrector.correct(text, book: b), text)
+    }
+
+    func testParakeetAliasGateRejectsDistantCollisionAndKeepsCloseCorrection() {
+        let b = book("Ask ChatGPT", aliases: ["what is dlc", "ask gp"])
+            .retainingAliases(
+                minimumSpellingSimilarity: ParakeetVocabularyBooster.minimumLearnedAliasSimilarity
+            )
+        XCTAssertEqual(
+            VocabularyCorrector.correct("No no, what is DLC trying to say.", book: b),
+            "No no, what is DLC trying to say."
+        )
+        XCTAssertEqual(
+            VocabularyCorrector.correct("Ask GP to summarize it.", book: b),
+            "Ask ChatGPT to summarize it."
+        )
+    }
+
     /// An empty book must behave exactly like an empty vocabulary list.
     func testEmptyBookLeavesTextAlone() {
         let text = "current johar"

@@ -16,14 +16,54 @@ import FluidAudio
 /// what makes this different in kind from `VocabularyCorrector` — it is checking
 /// the recording, not guessing from spelling.
 ///
-/// The learned mistakes go in as `aliases`, which the rescorer matches against
-/// alongside the correct spelling, so a form the user has already fixed once is
-/// a form this layer recognizes.
+/// Learned mistakes are admitted only when their spelling remains recognizably
+/// close to the canonical term. A stored alias is evidence about an earlier
+/// correction, not proof that unrelated words mean the dictionary term in a new
+/// sentence. The similarity gate keeps useful compressions such as "Ask GP" for
+/// "Ask ChatGPT" while rejecting collisions such as "what is DLC".
 ///
 /// Everything here is best-effort. The CTC model is a second, separate download,
 /// so it is fetched only once the user actually has dictionary terms, and any
 /// failure leaves the transcript exactly as Parakeet produced it.
 public actor ParakeetVocabularyBooster {
+    /// Keep rescoring anchored to a plausible TDT word or learned alias. FluidAudio's
+    /// acoustic-only rescue can otherwise inject a short dictionary term into unrelated
+    /// speech (for example, "Xbox" over ordinary sentence fragments).
+    static let rescorerConfig = VocabularyRescorer.Config(spotterRescueEnabled: false)
+
+    /// FluidAudio permits 0.50 similarity for small vocabularies. That is useful
+    /// for recall, but too permissive for dictation: it allowed the correctly
+    /// decoded word "next" to be replaced by the dictionary term "Xbox" at
+    /// 0.57 similarity. Keep FluidAudio's size-aware threshold while enforcing
+    /// the conservative 0.60 floor it already uses for large vocabularies.
+    static let minimumReplacementSimilarity: Float = 0.60
+
+    /// Require the canonical dictionary spelling to win on acoustic evidence.
+    /// A positive context-biasing weight can turn a learned alias into a forced
+    /// replacement even when the speaker said ordinary prose (for example,
+    /// "what I'm" becoming "Ask ChatGPT"). Aliases still nominate candidates;
+    /// they no longer receive free score simply for being in the dictionary.
+    static let contextBiasingWeight: Float = 0
+
+    /// Minimum letters-only similarity between a learned alias and its canonical
+    /// term. This is deliberately independent of transcript similarity: it
+    /// decides whether the learned mapping itself is safe enough to reuse.
+    static let minimumLearnedAliasSimilarity = 0.50
+
+    static func safeAliases(for entry: VocabularyEntry) -> [String] {
+        entry.aliases.filter {
+            VocabularyCorrector.spellingSimilarity($0, entry.term)
+                >= minimumLearnedAliasSimilarity
+        }
+    }
+
+    static func replacementSimilarity(forVocabularySize size: Int) -> Float {
+        max(
+            ContextBiasingConstants.rescorerConfig(forVocabSize: size).minSimilarity,
+            minimumReplacementSimilarity
+        )
+    }
+
     /// Where the CTC models live. Mirrors `ModelManager`'s layout so a
     /// user-chosen model directory (e.g. an external SSD) holds these too.
     private let modelDirectory: URL
@@ -86,15 +126,14 @@ public actor ParakeetVocabularyBooster {
 
             // Thresholds tighten as the dictionary grows: more candidates means
             // more chances for a plausible-but-wrong substitution.
-            let sizing = ContextBiasingConstants.rescorerConfig(forVocabSize: context.terms.count)
             let output = rescorer.ctcTokenRescore(
                 transcript: text,
                 tokenTimings: tokenTimings,
                 logProbs: spotted.logProbs,
                 frameDuration: spotted.frameDuration,
-                cbw: sizing.cbw,
+                cbw: Self.contextBiasingWeight,
                 marginSeconds: ContextBiasingConstants.defaultMarginSeconds,
-                minSimilarity: sizing.minSimilarity
+                minSimilarity: Self.replacementSimilarity(forVocabularySize: context.terms.count)
             )
             guard output.wasModified else { return nil }
             LatencyLog.record("parakeet vocab boost applied \(output.replacements.count) replacement(s)")
@@ -121,7 +160,7 @@ public actor ParakeetVocabularyBooster {
         let built = try await VocabularyRescorer.create(
             spotter: spotter,
             vocabulary: context,
-            config: .default,
+            config: Self.rescorerConfig,
             ctcModelDirectory: modelDirectory
         )
         rescorer = built
@@ -137,6 +176,23 @@ public actor ParakeetVocabularyBooster {
 
     public var isModelInstalled: Bool {
         Self.isModelInstalled(at: modelDirectory)
+    }
+
+    /// Loads the spotter and tokenizer ahead of the first dictation that needs
+    /// them, so `boost()`'s first real call isn't the one paying for it. Callers
+    /// should only invoke this once `isModelInstalled` is true; best-effort, like
+    /// `boost()` itself, since a boosting failure never affects dictation.
+    public func prewarm() async {
+        guard !loadFailed else { return }
+        do {
+            // Models first: the tokenizer's vocabulary file ships with them, so
+            // loading it before them would fail on a fresh install.
+            _ = try await loadedSpotter()
+            _ = try await loadedTokenizer()
+        } catch {
+            loadFailed = true
+            LatencyLog.record("parakeet vocab boost prewarm failed (\(error)); transcript left unchanged")
+        }
     }
 
     /// Downloads the CTC model. Separate from `boost` on purpose: this is the
@@ -177,9 +233,10 @@ public actor ParakeetVocabularyBooster {
         let terms = book.entries.compactMap { entry -> CustomVocabularyTerm? in
             let ids = tokenizer.encode(entry.term)
             guard !ids.isEmpty else { return nil }
+            let aliases = Self.safeAliases(for: entry)
             return CustomVocabularyTerm(
                 text: entry.term,
-                aliases: entry.aliases.isEmpty ? nil : entry.aliases,
+                aliases: aliases.isEmpty ? nil : aliases,
                 ctcTokenIds: ids
             )
         }

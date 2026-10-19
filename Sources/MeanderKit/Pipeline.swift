@@ -100,6 +100,7 @@ public final class Pipeline {
     public func stopAndProcess(target: DictationTarget? = nil) async throws -> String {
         let samples = recorder.stop()
         guard !samples.isEmpty else { return "" }
+        DictationCapture.save(samples) // TEMPORARY: log/lock capture experiment.
 
         let language = settings.effectiveLanguage
         let transcribeStart = DispatchTime.now()
@@ -145,7 +146,12 @@ public final class Pipeline {
         // fully on-device) sees "Karan Johar" instead of "current johar". Learned
         // mistakes ride along, so a mishearing the user has already fixed once is
         // repaired exactly rather than re-guessed phonetically.
-        prepared = VocabularyCorrector.correct(prepared, book: settings.vocabularyBook)
+        let correctionBook = settings.transcriptionBackend == .fluidAudioParakeet
+            ? settings.vocabularyBook.retainingAliases(
+                minimumSpellingSimilarity: ParakeetVocabularyBooster.minimumLearnedAliasSimilarity
+            )
+            : settings.vocabularyBook
+        prepared = VocabularyCorrector.correct(prepared, book: correctionBook)
 
         let cleaner = CleanupFactory.make(
             settings: settings,

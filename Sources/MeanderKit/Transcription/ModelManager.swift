@@ -150,14 +150,49 @@ public final class ModelManager {
         )
         let manager = AsrManager(config: .default)
         try await manager.loadModels(models)
+        await Self.prewarmFluidAudio(manager)
         let settings = self.settings
+        let booster = ParakeetVocabularyBooster(modelDirectory: ctcModelDirectory)
+        if await booster.isModelInstalled {
+            await booster.prewarm()
+        }
         return FluidAudioTranscriber(
             asrManager: manager,
             // Constructed unconditionally; it downloads its model only if and
             // when the user actually has dictionary terms.
-            booster: ParakeetVocabularyBooster(modelDirectory: ctcModelDirectory),
+            booster: booster,
             vocabularyProvider: { settings.vocabularyBook }
         )
+    }
+
+    /// Runs one throwaway transcription on silence right after the models load,
+    /// so the first real dictation isn't cold.
+    ///
+    /// Loading the `.mlmodelc` files alone does not pay the full cost: like
+    /// WhisperKit's encoder above, Core ML only compiles the on-device Neural
+    /// Engine program the first time `predict()` actually runs, and Parakeet's
+    /// loader (unlike WhisperKit's) uses the default `.cpuAndNeuralEngine`
+    /// compute units, so that one-time compile is still in play. Running a real
+    /// pass here forces it at launch, while the menu is already showing
+    /// "Preparing model…", instead of on the user's first press of the hotkey.
+    ///
+    /// Best-effort: on failure the transcriber is still returned and used as
+    /// normal; the first real dictation just pays the cost this was meant to
+    /// avoid, exactly as it did before this existed.
+    private static func prewarmFluidAudio(_ manager: AsrManager) async {
+        let start = DispatchTime.now()
+        do {
+            let decoderLayers = await manager.decoderLayerCount
+            var decoderState = try TdtDecoderState(decoderLayers: decoderLayers)
+            // Half a second of silence at 16 kHz: enough to exercise every stage
+            // of the encoder/decoder/joint pipeline without adding real latency.
+            let silence = [Float](repeating: 0, count: 8_000)
+            _ = try await manager.transcribe(silence, decoderState: &decoderState, language: nil)
+            let ms = Double(DispatchTime.now().uptimeNanoseconds - start.uptimeNanoseconds) / 1_000_000
+            LatencyLog.record(String(format: "parakeet prewarm %.0fms (ANE compile + 1 pass)", ms))
+        } catch {
+            LatencyLog.record("parakeet prewarm FAILED: \(error)")
+        }
     }
 
     /// Where the auxiliary CTC model for dictionary boosting lives. Kept beside

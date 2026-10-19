@@ -48,14 +48,18 @@ public enum VocabularyCorrector {
     /// that exactly matches a known misheard form is replaced outright: the user
     /// has already demonstrated that exact repair, so it needs no phonetic
     /// confidence check and is applied before any fuzzy match can claim the span.
-    public static func correct(_ text: String, book: VocabularyBook) -> String {
+    public static func correct(
+        _ text: String,
+        book: VocabularyBook,
+        includeAliases: Bool = true
+    ) -> String {
         guard !text.isEmpty, !book.isEmpty else { return text }
 
         let segments = split(text)
         let words = segments.compactMap { $0.word }
         guard !words.isEmpty else { return text }
 
-        let matches = bestMatches(words: words, book: book)
+        let matches = bestMatches(words: words, book: book, includeAliases: includeAliases)
         guard !matches.isEmpty else { return text }
 
         return rebuild(segments: segments, words: words, matches: matches)
@@ -71,11 +75,17 @@ public enum VocabularyCorrector {
         let replacement: String
     }
 
-    private static func bestMatches(words: [Word], book: VocabularyBook) -> [Match] {
+    private static func bestMatches(
+        words: [Word],
+        book: VocabularyBook,
+        includeAliases: Bool
+    ) -> [Match] {
         let vocabulary = book.terms
         // Learned mistakes first, at a score no fuzzy candidate can reach, so an
         // exact known mishearing always wins its span.
-        var candidates = aliasMatches(words: words, aliases: book.aliasIndex)
+        var candidates = includeAliases
+            ? aliasMatches(words: words, aliases: book.aliasIndex)
+            : []
         // Spans already spelled exactly right are locked, so a fuzzy window like
         // "Karan Johar is" can't swallow a correct "Karan Johar".
         var used = exactSpans(words: words, vocabulary: vocabulary)
@@ -257,6 +267,16 @@ public enum VocabularyCorrector {
     /// Internal so `DictionaryLearner` shares the same notion of similarity.
     static func lettersOnly(_ s: String) -> [Character] {
         s.lowercased().filter(\.isLetter)
+    }
+
+    /// Letters-only Levenshtein similarity shared with the Parakeet alias gate.
+    /// Spaces and punctuation do not make a learned mapping safer or less safe.
+    static func spellingSimilarity(_ lhs: String, _ rhs: String) -> Double {
+        let a = lettersOnly(lhs)
+        let b = lettersOnly(rhs)
+        let longest = max(a.count, b.count)
+        guard longest > 0 else { return 1 }
+        return 1 - Double(editDistance(a, b)) / Double(longest)
     }
 
     /// A compact consonant skeleton (simplified Metaphone): vowels dropped,

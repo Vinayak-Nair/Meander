@@ -14,7 +14,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", from: "0.9.0"),
-        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.15.4"),
+        .package(url: "https://github.com/FluidInference/FluidAudio.git", from: "0.15.5"),
         // On-device LLM cleanup (MLX). Isolated in the MeanderMLX target so this
         // heavy dependency stays out of MeanderKit and the shipping app until the
         // eval proves a small local model is worth it.

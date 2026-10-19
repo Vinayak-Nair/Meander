@@ -13,6 +13,43 @@ import XCTest
 /// booster at a directory with no model is what proves it — any code path that
 /// reached the model would throw or hang instead of returning nil.
 final class ParakeetVocabularyBoosterTests: XCTestCase {
+    func testDisablesAcousticOnlySpotterRescue() {
+        XCTAssertFalse(ParakeetVocabularyBooster.rescorerConfig.spotterRescueEnabled)
+    }
+
+    func testRejectsWeakSmallVocabularyMatches() {
+        XCTAssertEqual(
+            ParakeetVocabularyBooster.replacementSimilarity(forVocabularySize: 2),
+            0.60
+        )
+    }
+
+    func testRequiresDictionaryTermToWinAcousticallyWithoutFreeBoost() {
+        XCTAssertEqual(ParakeetVocabularyBooster.contextBiasingWeight, 0)
+    }
+
+    func testKeepsOnlyAliasesCloseToCanonicalTerm() {
+        let entry = VocabularyEntry(
+            term: "Ask ChatGPT",
+            aliases: ["what is dlc", "ask gp", "ask judge gpt"],
+            sources: []
+        )
+        XCTAssertEqual(
+            ParakeetVocabularyBooster.safeAliases(for: entry),
+            ["ask gp", "ask judge gpt"]
+        )
+    }
+
+    func testDoesNotLoosenFluidAudioThresholdForLargeVocabulary() {
+        let fluidAudioThreshold = ContextBiasingConstants
+            .rescorerConfig(forVocabSize: 101)
+            .minSimilarity
+        XCTAssertGreaterThanOrEqual(
+            ParakeetVocabularyBooster.replacementSimilarity(forVocabularySize: 101),
+            fluidAudioThreshold
+        )
+    }
+
     private func makeBooster() -> ParakeetVocabularyBooster {
         let empty = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("meander-test-no-ctc-\(UUID().uuidString)", isDirectory: true)
