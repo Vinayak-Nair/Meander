@@ -36,6 +36,7 @@ public enum CleanupRegistry {
         [
             .init(id: "deterministic", displayName: "On-device rules (fast, no AI)",  requiresNetwork: false, requiresAPIKey: false),
             .init(id: "mlx",           displayName: "On-device LLM (MLX, beta)",      requiresNetwork: false, requiresAPIKey: false),
+            .init(id: "mlx-gemma",     displayName: "On-device Gemma 4 E2B (MLX, best quality, slow ~4s, 3.3 GB)", requiresNetwork: false, requiresAPIKey: false),
             .init(id: "none",          displayName: "Raw transcription (no cleanup)", requiresNetwork: false, requiresAPIKey: false),
             .init(id: "openai",        displayName: "Cloud (OpenAI / Groq / Sarvam)", requiresNetwork: true,  requiresAPIKey: true),
             .init(id: "ollama",        displayName: "Local LLM via Ollama (advanced)", requiresNetwork: false, requiresAPIKey: false),

@@ -15,6 +15,7 @@ let cwd = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
 let mlxModels: [(name: String, id: String, dir: String)] = [
     ("MLX Qwen 0.5B", "mlx-qwen-0.5b", "eval/models/qwen2.5-0.5b-4bit"),
     ("MLX Qwen 1.5B", "mlx-qwen-1.5b", "eval/models/qwen2.5-1.5b-4bit"),
+    ("MLX Gemma 4 E2B", "mlx-gemma-4-e2b", "eval/models/gemma-4-e2b-4bit"),
 ]
 for m in mlxModels {
     let dir = cwd.appendingPathComponent(m.dir)

@@ -7,12 +7,18 @@ import MeanderKit
 final class Hotkey {
     var onPress: () -> Void = {}
     var onRelease: () -> Void = {}
+    /// Quill key (second push-to-talk key), active only when enabled in Settings.
+    var onQuillPress: () -> Void = {}
+    var onQuillRelease: () -> Void = {}
+    private var isQuillHeld = false
 
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var tapThread: Thread?
     private var tapRunLoop: CFRunLoop?
     private var isHeld = false
+    /// Toggle mode: whether a toggle-started recording is currently running.
+    private var toggledOn = false
 
     /// Modifier keycodes mapped to their CGEventFlags bit.
     private static let modifierFlags: [Int: CGEventFlags] = [
@@ -95,20 +101,50 @@ final class Hotkey {
     private func handle(type: CGEventType, event: CGEvent) {
         let keyCode = Int(event.getIntegerValueField(.keyboardEventKeycode))
         let ptt = Settings.shared.pttKeyCode
+        if let held = Self.heldState(type: type, keyCode: keyCode, flags: event.flags, key: ptt) {
+            setHeld(held)
+        }
+        let quill = Settings.shared.quillKeyCode
+        if Settings.shared.quillEnabled, quill != ptt,
+           let held = Self.heldState(type: type, keyCode: keyCode, flags: event.flags, key: quill) {
+            setQuillHeld(held)
+        }
+    }
 
-        if let flag = Self.modifierFlags[ptt] {
-            guard type == .flagsChanged, keyCode == ptt else { return }
-            setHeld(event.flags.contains(flag))
-        } else {
-            guard keyCode == ptt else { return }
-            if type == .keyDown { setHeld(true) }
-            else if type == .keyUp { setHeld(false) }
+    /// nil when the event is not about `key`; otherwise whether it is now held.
+    private static func heldState(type: CGEventType, keyCode: Int, flags: CGEventFlags, key: Int) -> Bool? {
+        if let flag = modifierFlags[key] {
+            guard type == .flagsChanged, keyCode == key else { return nil }
+            return flags.contains(flag)
+        }
+        guard keyCode == key else { return nil }
+        if type == .keyDown { return true }
+        if type == .keyUp { return false }
+        return nil
+    }
+
+    private func setQuillHeld(_ held: Bool) {
+        guard held != isQuillHeld else { return }
+        isQuillHeld = held
+        DispatchQueue.main.async { [weak self] in
+            if held { self?.onQuillPress() } else { self?.onQuillRelease() }
         }
     }
 
     private func setHeld(_ held: Bool) {
         guard held != isHeld else { return } // dedupe auto-repeat / flag noise
         isHeld = held
+        if Settings.shared.pressToToggle {
+            // Press once to start, press again to stop; releases are ignored.
+            guard held else { return }
+            toggledOn.toggle()
+            let starting = toggledOn
+            DispatchQueue.main.async { [weak self] in
+                if starting { self?.onPress() } else { self?.onRelease() }
+            }
+            return
+        }
+        toggledOn = false
         DispatchQueue.main.async { [weak self] in
             if held { self?.onPress() } else { self?.onRelease() }
         }

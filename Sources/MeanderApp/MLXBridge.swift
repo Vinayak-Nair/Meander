@@ -41,6 +41,24 @@ enum MLXBridge {
         }
     }
 
+    /// Registers the optional Gemma 4 E2B cleanup provider. It is never bundled
+    /// (about 3.3 GB): it is used only if the user has put the model in this
+    /// directory (`scripts/fetch-eval-model.sh mlx-community/gemma-4-e2b-it-4bit <dir>`).
+    /// Loaded lazily on first use, not prewarmed, so it costs nothing otherwise.
+    static func registerGemma(modelsRoot: URL, settings: Settings) {
+        let dir = modelsRoot.appendingPathComponent("mlx/gemma-4-e2b-4bit", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: dir.appendingPathComponent("config.json").path) else {
+            return
+        }
+        let provider = MLXCleanup(
+            id: "mlx-gemma",
+            displayName: "On-device Gemma 4 E2B (MLX)",
+            modelDirectory: dir,
+            vocabularyProvider: { settings.vocabularyBook }
+        )
+        CleanupFactory.externalBuilders["mlx-gemma"] = { _, _, _ in provider }
+    }
+
     /// Copies the model shipped inside the app bundle (see scripts/release.sh)
     /// into the models directory on first launch, so the loader — which reads a
     /// plain directory, not the HF hub — finds it. No-op once installed, and in

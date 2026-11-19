@@ -27,13 +27,37 @@ No Homebrew, no Terminal, no separate downloads. Everything is handled inside th
 ## Using Meander
 
 - **Dictate:** hold Right Option (⌥), speak, release. The text is inserted at your cursor.
+- **Press to toggle:** turn it on in the dashboard to press the key once to start and again to stop, instead of holding it.
 - **Change language:** menu bar ▸ Language, or Settings.
 - **Pick a cleanup style:** Settings ▸ Cleanup.
 - Sounds confirm start, success, and empty results.
 
+### Quill: rewrite with your voice
+
+Turn on **Quill** in the dashboard. Select text in any app, hold **Right Control**, say an instruction such as "make this friendlier", and release. The selection is replaced with the rewrite. With nothing selected, Quill writes new text at the cursor. Quill needs an LLM cleanup provider (Ollama, an OpenAI-compatible endpoint, or the on-device model); the plain on-device rules cannot rewrite.
+
+### Autocomplete
+
+Turn on **Autocomplete** in the dashboard to see gray suggestions as you type. **Tab** accepts the whole suggestion, **Option+Right** takes one word, **Esc** dismisses. It runs on the on-device model only: what you type is read through Accessibility, handed to the local model, and dropped. It works only in the apps on your allowlist (Notes, Mail, Messages, TextEdit, Safari and Chrome to start), never in password fields or terminals, and only when the caret is at the end of a line. It needs the app to report the caret position, so some apps will not show suggestions. Suggestion quality depends on the local model.
+
+### Shortcuts and Siri
+
+Meander adds **Toggle Dictation**, **Start Dictation**, **Stop Dictation** and **Get Latest Dictation** actions to the Shortcuts app.
+
 ## Languages
 
-Meander currently defaults to **FluidAudio English** using Parakeet TDT v3.
+Meander defaults to **FluidAudio Parakeet TDT v3**. The dictation model picker also offers:
+
+| Model | Size | Notes |
+|-------|------|-------|
+| **Parakeet v3** (default) | ~461 MB | Fast and accurate, English-first, bundled in the DMG |
+| **Apple Speech** | none | macOS 26 or later, uses Apple's on-device SpeechAnalyzer |
+| **Nemotron 3.5 multilingual** (beta) | large | Multilingual with a language picker |
+| **Parakeet Unified** (experimental) | ~565 MB | English, best-of-batch encoder |
+| **Parakeet Lite 120M** (experimental) | ~120 MB | Small English model; slightly less accurate |
+| **WhisperKit** | varies | Indian and international languages, see below |
+
+Accuracy and speed differ by model and by voice. Try a few and keep the one that suits you.
 
 In Settings you can switch the dictation model to **WhisperKit Multilingual**, which runs fully on-device (no Python, no account, no gated downloads). It covers:
 
@@ -50,6 +74,7 @@ Indian-language and low-resource accuracy is best with the Large model; smaller 
 | **On-device** (default) | Your Mac | None | Instant, private formatting |
 | **Cloud (OpenAI-compatible)** | A hosted API | Base URL + key | Highest quality; works with OpenAI, Groq, **Sarvam**, LM Studio |
 | **Local LLM (Ollama)** | Your Mac | Run Ollama | Private LLM cleanup, advanced |
+| **On-device LLM (MLX)** | Your Mac | Bundled small model | Optional, small model; a larger Gemma 4 model is opt-in and slow |
 | **Raw** | n/a | None | Insert the transcription verbatim |
 
 The cleanup layer is model-agnostic, so adding an Indian-language model such as Sarvam is just a base URL and model name in Settings.

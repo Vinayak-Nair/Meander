@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "MeanderKit", targets: ["MeanderKit"]),
         .library(name: "MeanderMLX", targets: ["MeanderMLX"]),
         .executable(name: "meander-eval", targets: ["MeanderEval"]),
+        .executable(name: "meander-asr-bench", targets: ["MeanderAsrBench"]),
     ],
     dependencies: [
         .package(url: "https://github.com/argmaxinc/argmax-oss-swift.git", from: "0.9.0"),
@@ -54,6 +55,14 @@ let package = Package(
             name: "MeanderEval",
             dependencies: ["MeanderKit", "MeanderMLX"],
             path: "Sources/MeanderEval"
+        ),
+        // Speech-model bench: transcribes the same WAV files with each local
+        // backend and prints WER and real-time factor. Run:
+        // `swift run meander-asr-bench <dir with NAME.wav + NAME.txt pairs>`.
+        .executableTarget(
+            name: "MeanderAsrBench",
+            dependencies: ["MeanderKit"],
+            path: "Sources/MeanderAsrBench"
         ),
         .testTarget(
             name: "MeanderKitTests",

@@ -41,6 +41,14 @@ public final class ModelManager {
             return isFluidAudioDownloaded
         case .nemotronEnglish:
             return isNemotronEnglishDownloaded
+        case .parakeetEou:
+            return isParakeetEouDownloaded
+        case .parakeetUnified:
+            return isParakeetUnifiedDownloaded
+        case .nemotronMultilingual:
+            return isNemotronMultilingualDownloaded
+        case .appleSpeech:
+            return true // system-managed; the locale asset installs on first load
         case .whisperKit:
             return isDownloaded(requested ?? settings.modelVariant)
         }
@@ -58,6 +66,17 @@ public final class ModelManager {
             return try await loadFluidAudioTranscriber(onProgress: onProgress)
         case .nemotronEnglish:
             return try await loadNemotronEnglishTranscriber(onProgress: onProgress)
+        case .parakeetEou:
+            return try await loadParakeetEouTranscriber(onProgress: onProgress)
+        case .parakeetUnified:
+            return try await loadParakeetUnifiedTranscriber(onProgress: onProgress)
+        case .nemotronMultilingual:
+            return try await loadNemotronMultilingualTranscriber(onProgress: onProgress)
+        case .appleSpeech:
+            guard #available(macOS 26.0, *) else {
+                throw NSError(domain: "Meander", code: 26, userInfo: [NSLocalizedDescriptionKey: "Apple Speech requires macOS 26 or later."])
+            }
+            return AppleSpeechTranscriber()
         case .whisperKit:
             return try await loadWhisperKitTranscriber(variant: requested, onProgress: onProgress)
         }
@@ -276,6 +295,105 @@ public final class ModelManager {
             }
         )
         return NemotronEnglishTranscriber(manager: manager)
+    }
+
+    // MARK: Parakeet EOU 120M (small English streaming model)
+
+    private let eouChunkSize: StreamingChunkSize = .ms320
+
+    private var parakeetEouCacheDir: URL {
+        nemotronModelsBaseDir.appendingPathComponent(
+            Repo.parakeetEou320.folderName, isDirectory: true
+        )
+    }
+
+    private var isParakeetEouDownloaded: Bool {
+        let dir = parakeetEouCacheDir
+        return ModelNames.ParakeetEOU.requiredModels.allSatisfy {
+            FileManager.default.fileExists(atPath: dir.appendingPathComponent($0).path)
+        }
+    }
+
+    private func loadParakeetEouTranscriber(
+        onProgress: ((Double) -> Void)? = nil
+    ) async throws -> Transcriber {
+        try FileManager.default.createDirectory(
+            at: nemotronModelsBaseDir, withIntermediateDirectories: true
+        )
+        let manager = StreamingEouAsrManager(chunkSize: eouChunkSize)
+        try await manager.loadModels(
+            to: nemotronModelsBaseDir,
+            configuration: nil,
+            progressHandler: { progress in
+                onProgress?(progress.fractionCompleted)
+            }
+        )
+        return ParakeetEouTranscriber(manager: manager)
+    }
+
+    // MARK: Parakeet Unified 0.6B (English, offline)
+
+    private var isParakeetUnifiedDownloaded: Bool {
+        let dir = nemotronModelsBaseDir.appendingPathComponent(
+            Repo.parakeetUnified.folderName, isDirectory: true
+        )
+        return [
+            ModelNames.ParakeetUnified.offlineEncoderFile(precision: .int8),
+            ModelNames.ParakeetUnified.decoderFile,
+            ModelNames.ParakeetUnified.jointDecisionFile,
+            ModelNames.ParakeetUnified.vocab,
+        ].allSatisfy { FileManager.default.fileExists(atPath: dir.appendingPathComponent($0).path) }
+    }
+
+    private func loadParakeetUnifiedTranscriber(
+        onProgress: ((Double) -> Void)? = nil
+    ) async throws -> Transcriber {
+        try FileManager.default.createDirectory(
+            at: nemotronModelsBaseDir, withIntermediateDirectories: true
+        )
+        let manager = UnifiedAsrManager()
+        try await manager.loadModels(
+            to: nemotronModelsBaseDir,
+            configuration: nil,
+            progressHandler: { progress in
+                onProgress?(progress.fractionCompleted)
+            }
+        )
+        return ParakeetUnifiedTranscriber(manager: manager)
+    }
+
+    // MARK: Nemotron 3.5 multilingual streaming
+
+    /// 2240 ms is FluidAudio's recommended tier; the full-vocabulary "auto"
+    /// variant covers every language the model supports.
+    private let nemotronMultilingualChunkMs = 2240
+
+    private var isNemotronMultilingualDownloaded: Bool {
+        let metadata = nemotronModelsBaseDir
+            .appendingPathComponent(Repo.nemotronMultilingual.folderName, isDirectory: true)
+            .appendingPathComponent("multilingual/\(nemotronMultilingualChunkMs)ms", isDirectory: true)
+            .appendingPathComponent(ModelNames.NemotronMultilingualStreaming.metadata)
+        return FileManager.default.fileExists(atPath: metadata.path)
+    }
+
+    private func loadNemotronMultilingualTranscriber(
+        onProgress: ((Double) -> Void)? = nil
+    ) async throws -> Transcriber {
+        try FileManager.default.createDirectory(
+            at: nemotronModelsBaseDir, withIntermediateDirectories: true
+        )
+        let shared = try await StreamingNemotronMultilingualAsrManager.downloadAndPreloadShared(
+            languageCode: "auto",
+            chunkMs: nemotronMultilingualChunkMs,
+            to: nemotronModelsBaseDir,
+            configuration: nil,
+            progressHandler: { progress in
+                onProgress?(progress.fractionCompleted)
+            }
+        )
+        let manager = StreamingNemotronMultilingualAsrManager()
+        try await manager.loadFromShared(shared)
+        return NemotronMultilingualTranscriber(manager: manager)
     }
 
     private func loadWhisperKitTranscriber(

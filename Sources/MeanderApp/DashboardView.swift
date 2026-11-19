@@ -240,6 +240,56 @@ struct DashboardView: View {
 
             LightCard {
                 HStack {
+                    Text("Autocomplete").font(.callout.weight(.semibold)).foregroundStyle(GF.ink)
+                    Spacer()
+                    Toggle("", isOn: $state.autocompleteEnabled).labelsHidden().toggleStyle(.switch).controlSize(.small)
+                }
+                Text(state.autocompleteEnabled
+                     ? "Suggestions appear as gray text while you type. Tab accepts, Option+Right takes one word. Runs on this Mac only."
+                     : "Turn on for on-device inline suggestions in the apps you choose.")
+                    .font(.caption).foregroundStyle(GF.inkSecondary)
+                if state.autocompleteEnabled {
+                    ForEach(state.autocompleteApps, id: \.self) { id in
+                        HStack {
+                            Text(AutocompleteAppNames.name(for: id)).font(.caption2.weight(.medium)).foregroundStyle(GF.ink)
+                            Spacer()
+                            Button("Remove") { state.autocompleteApps.removeAll { $0 == id } }
+                                .buttonStyle(.plain).font(.caption2).foregroundStyle(GF.inkSecondary)
+                        }
+                    }
+                    Menu("Add app") {
+                        ForEach(AutocompleteAppNames.addable(excluding: state.autocompleteApps), id: \.id) { app in
+                            Button(app.name) { state.autocompleteApps.append(app.id) }
+                        }
+                    }
+                    .menuStyle(.borderlessButton).font(.caption)
+                }
+            }
+
+            LightCard {
+                HStack {
+                    Text("Quill").font(.callout.weight(.semibold)).foregroundStyle(GF.ink)
+                    Spacer()
+                    Toggle("", isOn: $state.quillEnabled).labelsHidden().toggleStyle(.switch).controlSize(.small)
+                }
+                Text(state.quillEnabled
+                     ? "Hold Right Control and say an instruction. Selected text is rewritten; with no selection, new text is written. Needs an LLM cleanup model."
+                     : "Turn on to rewrite selected text with your voice.")
+                    .font(.caption).foregroundStyle(GF.inkSecondary)
+            }
+
+            LightCard {
+                HStack {
+                    Text("Press to toggle").font(.callout.weight(.semibold)).foregroundStyle(GF.ink)
+                    Spacer()
+                    Toggle("", isOn: $state.pressToToggle).labelsHidden().toggleStyle(.switch).controlSize(.small)
+                }
+                Text(state.pressToToggle ? "Press the key once to start dictating and again to stop." : "Off: hold the key while you speak.")
+                    .font(.caption).foregroundStyle(GF.inkSecondary)
+            }
+
+            LightCard {
+                HStack {
                     Text("Command mode").font(.callout.weight(.semibold)).foregroundStyle(GF.ink)
                     Spacer()
                     Toggle("", isOn: $state.commandModeEnabled).labelsHidden().toggleStyle(.switch).controlSize(.small)
@@ -1087,5 +1137,32 @@ private extension AppState {
         case .needsSetup: return Color(red: 0.95, green: 0.6, blue: 0.2)
         case .error: return Color(red: 0.9, green: 0.3, blue: 0.36)
         }
+    }
+}
+
+
+/// App names for the autocomplete allowlist, resolved from bundle identifiers.
+enum AutocompleteAppNames {
+    /// Never offered: terminals and Meander itself, where inline suggestions are wrong.
+    private static let excluded: Set<String> = [
+        "com.apple.Terminal", "com.googlecode.iterm2", "dev.warp.Warp-Stable", "com.mitchellh.ghostty",
+        "com.apple.dt.Xcode", Bundle.main.bundleIdentifier ?? "",
+    ]
+
+    static func name(for bundleID: String) -> String {
+        if let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            return FileManager.default.displayName(atPath: url.path).replacingOccurrences(of: ".app", with: "")
+        }
+        return bundleID
+    }
+
+    static func addable(excluding current: [String]) -> [(id: String, name: String)] {
+        NSWorkspace.shared.runningApplications
+            .filter { $0.activationPolicy == .regular }
+            .compactMap { app -> (id: String, name: String)? in
+                guard let id = app.bundleIdentifier, !current.contains(id), !excluded.contains(id) else { return nil }
+                return (id, app.localizedName ?? id)
+            }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 }

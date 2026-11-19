@@ -63,9 +63,9 @@ public final class Settings {
     /// is held to. WhisperKit honors the user's selection (including auto-detect).
     public var effectiveLanguage: Language {
         switch transcriptionBackend {
-        case .fluidAudioParakeet, .nemotronEnglish:
+        case .fluidAudioParakeet, .nemotronEnglish, .parakeetEou, .parakeetUnified, .appleSpeech:
             return .english
-        case .whisperKit:
+        case .whisperKit, .nemotronMultilingual:
             return language
         }
     }
@@ -90,6 +90,40 @@ public final class Settings {
     public var pttKeyCode: Int {
         get { d.object(forKey: "pttKeyCode") as? Int ?? 61 }
         set { d.set(newValue, forKey: "pttKeyCode") }
+    }
+
+    /// When true the push-to-talk key toggles dictation (press once to start,
+    /// again to stop) instead of recording only while held.
+    public var pressToToggle: Bool {
+        get { d.bool(forKey: "pressToToggle") }
+        set { d.set(newValue, forKey: "pressToToggle") }
+    }
+
+    /// Quill: hold this key and speak an instruction to rewrite the selected text
+    /// (or write new text at the cursor). Off by default. Default key: Right Control.
+    public var quillEnabled: Bool {
+        get { d.bool(forKey: "quillEnabled") }
+        set { d.set(newValue, forKey: "quillEnabled") }
+    }
+    public var quillKeyCode: Int {
+        get { d.object(forKey: "quillKeyCode") as? Int ?? 62 }
+        set { d.set(newValue, forKey: "quillKeyCode") }
+    }
+
+    /// Inline autocomplete (ghost text). Off by default, on-device only, and only
+    /// in the apps listed here (bundle identifiers).
+    public var autocompleteEnabled: Bool {
+        get { d.bool(forKey: "autocompleteEnabled") }
+        set { d.set(newValue, forKey: "autocompleteEnabled") }
+    }
+    public var autocompleteApps: [String] {
+        get {
+            d.stringArray(forKey: "autocompleteApps") ?? [
+                "com.apple.Notes", "com.apple.mail", "com.apple.MobileSMS",
+                "com.apple.TextEdit", "com.apple.Safari", "com.google.Chrome",
+            ]
+        }
+        set { d.set(newValue, forKey: "autocompleteApps") }
     }
 
     // MARK: Cleanup
