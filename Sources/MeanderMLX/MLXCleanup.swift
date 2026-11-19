@@ -46,6 +46,22 @@ public final class MLXCleanup: CleanupProvider {
     }
 }
 
+extension MLXCleanup: RewriteProvider {
+    public func rewrite(selection: String, instruction: String) async throws -> String {
+        try await warm.clean(
+            QuillPrompt.user(selection: selection, instruction: instruction),
+            instructions: QuillPrompt.system
+        )
+    }
+}
+
+extension MLXCleanup: CompletionProvider {
+    public func complete(prefix: String) async throws -> String {
+        let raw = try await warm.complete(prefix, instructions: CompletionPrompt.system, maxTokens: 20)
+        return CompletionPrompt.sanitize(raw, prefix: prefix)
+    }
+}
+
 /// Owns the single, long-lived `ModelContainer`. Loading weights is the costly
 /// step; keeping the container alive keeps them resident so cleanup is just
 /// generation time.
@@ -104,5 +120,17 @@ actor WarmMLXModel {
         )
         let response = try await session.respond(to: text)
         return response.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Short, low-temperature continuation for autocomplete. The response is not
+    /// trimmed: a leading space is meaningful at the cursor.
+    func complete(_ text: String, instructions: String, maxTokens: Int) async throws -> String {
+        let container = try await loadedContainer()
+        let session = ChatSession(
+            container,
+            instructions: instructions,
+            generateParameters: Self.parameters(maxTokens: maxTokens)
+        )
+        return try await session.respond(to: text)
     }
 }

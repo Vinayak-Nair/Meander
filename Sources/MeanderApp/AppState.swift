@@ -54,6 +54,12 @@ final class AppState: ObservableObject {
     // Editable settings mirrors (observable for SwiftUI). didSet writes through.
     @Published var languageCode: String { didSet { settings.languageCode = languageCode } }
     @Published var cleanupProviderID: String { didSet { settings.cleanupProviderID = cleanupProviderID } }
+    @Published var autocompleteEnabled: Bool {
+        didSet { settings.autocompleteEnabled = autocompleteEnabled; AutocompleteController.shared.apply() }
+    }
+    @Published var autocompleteApps: [String] { didSet { settings.autocompleteApps = autocompleteApps } }
+    @Published var quillEnabled: Bool { didSet { settings.quillEnabled = quillEnabled } }
+    @Published var pressToToggle: Bool { didSet { settings.pressToToggle = pressToToggle } }
     @Published var commandModeEnabled: Bool { didSet { settings.commandModeEnabled = commandModeEnabled } }
     @Published var perAppProfilesEnabled: Bool { didSet { settings.perAppProfilesEnabled = perAppProfilesEnabled } }
     @Published var defaultProfileID: String { didSet { settings.defaultProfileID = defaultProfileID } }
@@ -102,6 +108,10 @@ final class AppState: ObservableObject {
         languageCode = s.languageCode
         cleanupProviderID = s.cleanupProviderID
         commandModeEnabled = s.commandModeEnabled
+        pressToToggle = s.pressToToggle
+        quillEnabled = s.quillEnabled
+        autocompleteEnabled = s.autocompleteEnabled
+        autocompleteApps = s.autocompleteApps
         perAppProfilesEnabled = s.perAppProfilesEnabled
         defaultProfileID = s.defaultProfileID
         openAIBaseURL = s.openAIBaseURL
@@ -139,6 +149,8 @@ final class AppState: ObservableObject {
         // Register the MLX on-device LLM cleanup provider (no-op if its model
         // isn't downloaded) and warm it so the first dictation isn't cold.
         MLXBridge.register(modelsRoot: modelManager.modelsDirectory, settings: settings)
+        MLXBridge.registerGemma(modelsRoot: modelManager.modelsDirectory, settings: settings)
+        AutocompleteController.shared.apply()
         // Repairs dictionaries poisoned by the old auto-learning rules before any
         // dictation can be run through them. Terms learned back then include
         // ordinary words like "taking" and "present", and the corrector matches on
@@ -219,6 +231,8 @@ final class AppState: ObservableObject {
     private func startHotkey() {
         hotkey.onPress = { Task { @MainActor in AppState.shared.startDictation() } }
         hotkey.onRelease = { Task { @MainActor in await AppState.shared.stopDictation() } }
+        hotkey.onQuillPress = { Task { @MainActor in await AppState.shared.beginQuill() } }
+        hotkey.onQuillRelease = { Task { @MainActor in await AppState.shared.endQuill() } }
         hotkey.start()
     }
 
@@ -271,6 +285,56 @@ final class AppState: ObservableObject {
         }
     }
 
+    // MARK: Quill (spoken rewrite)
+
+    /// Selection captured when the Quill key went down. nil means a normal
+    /// dictation; "" means "no selection: write new text at the cursor".
+    private var quillSelection: String?
+
+    func beginQuill() async {
+        guard settings.quillEnabled, case .idle = status else { return }
+        let selection = await Paster.copySelection()
+        guard case .idle = status else { return }
+        quillSelection = selection
+        startDictation()
+        if case .recording = status {} else { quillSelection = nil }
+    }
+
+    func endQuill() async {
+        guard quillSelection != nil else { return }
+        await stopDictation()
+    }
+
+    /// The provider that will follow the instruction: the active cleanup provider
+    /// if it is an LLM, else the on-device MLX model when installed.
+    private func rewriteProvider() -> RewriteProvider? {
+        let active = CleanupFactory.make(settings: settings)
+        if let rewriter = active as? RewriteProvider { return rewriter }
+        if let build = CleanupFactory.externalBuilders["mlx"],
+           let rewriter = build(settings, .standard, nil) as? RewriteProvider { return rewriter }
+        return nil
+    }
+
+    private func finishQuill(instruction: String, selection: String) async {
+        guard let provider = rewriteProvider() else {
+            Feedback.empty() // Quill needs an LLM cleanup model; the rules cannot rewrite
+            return
+        }
+        status = .transcribing
+        do {
+            let result = try await provider.rewrite(selection: selection, instruction: instruction)
+            status = .idle
+            if result.isEmpty { Feedback.empty(); return }
+            lastText = result
+            recordTranscript(result)
+            Paster.paste(result)
+            Feedback.success()
+        } catch {
+            status = .idle
+            Feedback.empty()
+        }
+    }
+
     func stopDictation() async {
         guard case .recording = status, let pipeline else { return }
         let streaming = pipeline.supportsStreaming
@@ -292,7 +356,11 @@ final class AppState: ObservableObject {
                 : try await pipeline.stopAndProcess(target: currentTarget)
             hideLiveOverlay()
             status = .idle
-            if text.isEmpty {
+            if let selection = quillSelection {
+                quillSelection = nil
+                if text.isEmpty { Feedback.empty() }
+                else { await finishQuill(instruction: text, selection: selection) }
+            } else if text.isEmpty {
                 Feedback.empty()
             } else {
                 lastText = text
@@ -306,6 +374,7 @@ final class AppState: ObservableObject {
                 )
             }
         } catch {
+            quillSelection = nil
             hideLiveOverlay()
             status = .idle
             Feedback.empty()
@@ -484,12 +553,38 @@ final class AppState: ObservableObject {
                 variant: nil
             ),
             DictationModelOption(
+                id: TranscriptionBackend.parakeetUnified.id,
+                displayName: "Parakeet Unified 0.6B, English (experimental)",
+                backendID: TranscriptionBackend.parakeetUnified.id,
+                variant: nil
+            ),
+            DictationModelOption(
+                id: TranscriptionBackend.parakeetEou.id,
+                displayName: "Parakeet Lite 120M, English (small, experimental)",
+                backendID: TranscriptionBackend.parakeetEou.id,
+                variant: nil
+            ),
+            DictationModelOption(
                 id: TranscriptionBackend.nemotronEnglish.id,
                 displayName: "Nemotron 0.6B, English (streaming, beta)",
                 backendID: TranscriptionBackend.nemotronEnglish.id,
                 variant: nil
             )
         ]
+        options.append(DictationModelOption(
+            id: TranscriptionBackend.nemotronMultilingual.id,
+            displayName: "Nemotron 3.5 0.6B, multilingual (beta)",
+            backendID: TranscriptionBackend.nemotronMultilingual.id,
+            variant: nil
+        ))
+        if TranscriptionBackend.appleSpeech.isAvailableOnThisSystem {
+            options.insert(DictationModelOption(
+                id: TranscriptionBackend.appleSpeech.id,
+                displayName: "Apple Speech, English (no download, macOS 26)",
+                backendID: TranscriptionBackend.appleSpeech.id,
+                variant: nil
+            ), at: 1)
+        }
         for option in ModelCatalog.options {
             options.append(DictationModelOption(
                 id: "whisperKit:\(option.id)",
@@ -505,6 +600,10 @@ final class AppState: ObservableObject {
         switch transcriptionBackend {
         case .fluidAudioParakeet: return TranscriptionBackend.fluidAudioParakeet.id
         case .nemotronEnglish: return TranscriptionBackend.nemotronEnglish.id
+        case .parakeetEou: return TranscriptionBackend.parakeetEou.id
+        case .parakeetUnified: return TranscriptionBackend.parakeetUnified.id
+        case .appleSpeech: return TranscriptionBackend.appleSpeech.id
+        case .nemotronMultilingual: return TranscriptionBackend.nemotronMultilingual.id
         case .whisperKit: return "whisperKit:\(modelVariant)"
         }
     }
@@ -677,7 +776,9 @@ final class AppState: ObservableObject {
         case .loadingModel:
             return modelLoadIsSlow ? "Preparing model… first run can take a minute" : "Preparing model…"
         case .downloadingModel(let p): return "Downloading model… \(Int(p * 100))%"
-        case .idle: return "Ready. Hold \(keyName(settings.pttKeyCode)) to talk"
+        case .idle: return settings.pressToToggle
+            ? "Ready. Press \(keyName(settings.pttKeyCode)) to start and stop"
+            : "Ready. Hold \(keyName(settings.pttKeyCode)) to talk"
         case .recording: return "Recording…"
         case .transcribing: return "Transcribing…"
         case .error(let m): return "Error: \(m)"
@@ -708,8 +809,10 @@ final class AppState: ObservableObject {
 
     var availableLanguages: [Language] {
         switch transcriptionBackend {
-        case .fluidAudioParakeet, .nemotronEnglish:
+        case .fluidAudioParakeet, .nemotronEnglish, .parakeetEou, .parakeetUnified, .appleSpeech:
             return [.english]
+        case .nemotronMultilingual:
+            return [.auto, .english] + Language.internationalLanguages
         case .whisperKit:
             return Language.whisperKitLanguages
         }
@@ -724,9 +827,9 @@ final class AppState: ObservableObject {
 
     var modelSetupTitle: String {
         switch transcriptionBackend {
-        case .fluidAudioParakeet, .nemotronEnglish:
+        case .fluidAudioParakeet, .nemotronEnglish, .parakeetEou, .parakeetUnified, .appleSpeech:
             return "Download the English speech model"
-        case .whisperKit:
+        case .whisperKit, .nemotronMultilingual:
             return "Download the speech model"
         }
     }
@@ -735,6 +838,14 @@ final class AppState: ObservableObject {
         switch transcriptionBackend {
         case .fluidAudioParakeet:
             return "A one-time FluidAudio Parakeet v3 download for fast, local dictation."
+        case .nemotronMultilingual:
+            return "A one-time Nemotron 3.5 multilingual 0.6B download. Pick a language or leave it on Auto."
+        case .appleSpeech:
+            return "Uses Apple's on-device SpeechAnalyzer. macOS may download its speech asset once."
+        case .parakeetUnified:
+            return "A one-time Parakeet Unified 0.6B download (~565 MB, English) for high-accuracy local dictation."
+        case .parakeetEou:
+            return "A one-time Parakeet EOU 120M download (~120 MB, English). A small, fast mode; use Parakeet v3 for best accuracy."
         case .nemotronEnglish:
             return "A one-time Nemotron 0.6B streaming model download (English). Prototype for evaluating streaming latency."
         case .whisperKit:
@@ -753,9 +864,9 @@ final class AppState: ObservableObject {
         let current = Language.from(code: languageCode)
         let fallback: Language
         switch transcriptionBackend {
-        case .fluidAudioParakeet, .nemotronEnglish:
+        case .fluidAudioParakeet, .nemotronEnglish, .parakeetEou, .parakeetUnified, .appleSpeech:
             fallback = .english
-        case .whisperKit:
+        case .whisperKit, .nemotronMultilingual:
             fallback = .auto
         }
         guard !availableLanguages.contains(current) else { return }

@@ -29,6 +29,25 @@ enum Paster {
         }
     }
 
+    /// Returns the text currently selected in the frontmost app by briefly sending
+    /// Cmd+C, then puts the previous clipboard back. Empty when nothing is selected.
+    @MainActor
+    static func copySelection() async -> String {
+        let pasteboard = NSPasteboard.general
+        let previous = snapshot(pasteboard)
+        pasteboard.clearContents()
+        let cleared = pasteboard.changeCount
+        sendKey(8) // 'c'
+        for _ in 0..<10 {
+            try? await Task.sleep(nanoseconds: 30_000_000)
+            if pasteboard.changeCount != cleared { break }
+        }
+        let selection = pasteboard.string(forType: .string) ?? ""
+        let after = pasteboard.changeCount
+        restore(previous, to: pasteboard, ifStillAt: after)
+        return selection
+    }
+
     /// Every representation of every item, so images and rich text survive a
     /// dictation instead of being flattened to plain text or dropped.
     private static func snapshot(_ pasteboard: NSPasteboard) -> [[NSPasteboard.PasteboardType: Data]] {
@@ -64,11 +83,12 @@ enum Paster {
         })
     }
 
-    private static func sendCmdV() {
+    private static func sendCmdV() { sendKey(9) } // 'v'
+
+    private static func sendKey(_ key: CGKeyCode) {
         let source = CGEventSource(stateID: .combinedSessionState)
-        let vKey: CGKeyCode = 9 // 'v'
-        let down = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: true)
-        let up = CGEvent(keyboardEventSource: source, virtualKey: vKey, keyDown: false)
+        let down = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: true)
+        let up = CGEvent(keyboardEventSource: source, virtualKey: key, keyDown: false)
         down?.flags = .maskCommand
         up?.flags = .maskCommand
         down?.post(tap: .cgAnnotatedSessionEventTap)

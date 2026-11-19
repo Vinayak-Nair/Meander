@@ -13,6 +13,10 @@ import Foundation
 public enum TranscriptionBackend: String, CaseIterable, Identifiable, Sendable {
     case fluidAudioParakeet = "fluidAudioParakeet"
     case nemotronEnglish = "nemotronEnglish"
+    case parakeetEou = "parakeetEou"
+    case parakeetUnified = "parakeetUnified"
+    case appleSpeech = "appleSpeech"
+    case nemotronMultilingual = "nemotronMultilingual"
     case whisperKit = "whisperKit"
 
     public static let defaultBackend: TranscriptionBackend = .fluidAudioParakeet
@@ -31,6 +35,14 @@ public enum TranscriptionBackend: String, CaseIterable, Identifiable, Sendable {
             return "FluidAudio Parakeet"
         case .nemotronEnglish:
             return "Nemotron English (streaming, beta)"
+        case .parakeetEou:
+            return "Parakeet Lite (120M, English)"
+        case .parakeetUnified:
+            return "Parakeet Unified (English)"
+        case .appleSpeech:
+            return "Apple Speech (macOS 26)"
+        case .nemotronMultilingual:
+            return "Nemotron Multilingual (streaming, beta)"
         case .whisperKit:
             return "WhisperKit Multilingual"
         }
@@ -42,6 +54,14 @@ public enum TranscriptionBackend: String, CaseIterable, Identifiable, Sendable {
             return "Parakeet TDT v3"
         case .nemotronEnglish:
             return "Nemotron 0.6B (1120ms)"
+        case .parakeetEou:
+            return "Parakeet EOU 120M (320ms)"
+        case .parakeetUnified:
+            return "Parakeet Unified 0.6B (offline)"
+        case .appleSpeech:
+            return "SpeechAnalyzer (system-managed)"
+        case .nemotronMultilingual:
+            return "Nemotron 3.5 0.6B (2240ms)"
         case .whisperKit:
             return nil
         }
@@ -55,9 +75,20 @@ public enum TranscriptionBackend: String, CaseIterable, Identifiable, Sendable {
     /// separately. Nemotron is genuinely English-only.
     public var supportsLanguageSelection: Bool {
         switch self {
-        case .fluidAudioParakeet, .nemotronEnglish:
+        case .fluidAudioParakeet, .nemotronEnglish, .parakeetEou, .parakeetUnified, .appleSpeech:
             return false
-        case .whisperKit:
+        case .whisperKit, .nemotronMultilingual:
+            return true
+        }
+    }
+
+    /// Backends that need a newer OS than Meander's macOS 14 floor.
+    public var isAvailableOnThisSystem: Bool {
+        switch self {
+        case .appleSpeech:
+            if #available(macOS 26.0, *) { return true }
+            return false
+        default:
             return true
         }
     }

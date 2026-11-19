@@ -9,6 +9,14 @@
 4. Grant **Microphone** and **Accessibility** when asked.
 5. Click into any text field, **hold Right Option (⌥)**, speak, and release.
 
+## What's new
+
+- **More speech models:** Apple Speech (macOS 26), Nemotron 3.5 multilingual (beta), Parakeet Unified and Parakeet Lite (experimental).
+- **Press to toggle:** start and stop dictation with one key press.
+- **Quill:** rewrite selected text with your voice (off by default).
+- **Autocomplete:** on-device ghost-text suggestions in the apps you choose (off by default).
+- **Shortcuts and Siri:** toggle dictation and fetch your latest dictation.
+
 ## What's included
 
 - **Bundled FluidAudio Parakeet v3** English model — dictation works instantly on first run, no extra download.
